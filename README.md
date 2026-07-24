@@ -48,19 +48,36 @@ TELEGRAM BOT (aiogram 3) ──► ORCHESTRATOR (FastAPI + APScheduler)
 
 Requirements: Python 3.11+, [Ollama](https://ollama.com) running locally.
 
-### Windows (PowerShell)
+### Windows (easiest)
+
+```
+ollama pull qwen2.5:7b-instruct
+```
+
+Then **double-click `start.bat`**. On first run it creates the virtual
+environment, installs everything, and copies `.env.example` to `.env`; after
+that it starts in seconds. Set a strong `DASHBOARD_PASSWORD` in `.env`.
+
+To reach the dashboard from your phone, double-click **`start-with-phone-access.bat`**
+instead — it prints a free `https://<random>.trycloudflare.com` link (no account,
+no port forwarding; requires `bin/cloudflared.exe` and a non-default password).
+
+### Windows (manual) / Linux / macOS
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1          # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 
 # one local model does the writer + classifier + researcher jobs (a 7B Q4 fits an 8GB GPU)
 ollama pull qwen2.5:7b-instruct
 
-copy .env.example .env      # then set DASHBOARD_PASSWORD and SECRET_KEY
-python run.py
+copy .env.example .env              # Linux/macOS: cp; then set DASHBOARD_PASSWORD and SECRET_KEY
+.venv\Scripts\python.exe run.py     # Linux/macOS: .venv/bin/python run.py
 ```
+
+> Use the venv's Python, not a bare `python run.py` — a system Python without the
+> project's packages fails with `No module named 'aiogram'`. `start.bat` avoids this.
 
 ### Linux / macOS
 
@@ -80,6 +97,10 @@ tune. Telegram and email are optional and configured from **Admin → Connection
 Then open **Admin → Campaign** and fill in your company, pitch, links, and
 signature. Until you do, the engine runs a clearly-marked example campaign and
 shows a banner.
+
+New to it? A plain-English, non-technical walkthrough of every feature — including
+how to collect and review prospects with **no email sent** — is in
+[`docs/Growth-Engine-User-Guide.pdf`](docs/Growth-Engine-User-Guide.pdf).
 
 ## Configuration
 

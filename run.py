@@ -5,8 +5,21 @@ Telegram bot (if token configured). DRY_RUN is the default mode.
 """
 import asyncio
 import logging
+import sys
 
-import uvicorn
+try:
+    import uvicorn
+    import aiogram  # noqa: F401 — dependency check only
+except ModuleNotFoundError as exc:
+    print(f"Missing dependency: {exc.name}. You are running Python from:\n"
+          f"  {sys.executable}\n"
+          "which does not have the project's packages installed.\n\n"
+          "Fix: use the project's virtual environment:\n"
+          "  Windows:      .venv\\Scripts\\python.exe run.py   (or start.bat)\n"
+          "  Linux/macOS:  .venv/bin/python run.py\n"
+          "Or install the packages once into this Python:\n"
+          "  python -m pip install -r requirements.txt")
+    raise SystemExit(1)
 
 from db.session import new_session
 from engine.config import ENGINE_MODES, get_settings
@@ -98,6 +111,7 @@ async def main() -> None:
 
     from bot.telegram_bot import run_bot
     from engine.scheduler import build_scheduler
+    from engine.tunnel import get_tunnel, maybe_start_tunnel
 
     scheduler = build_scheduler()
     scheduler.start()
@@ -107,9 +121,17 @@ async def main() -> None:
         log_level="warning",
     ))
 
+    async def serve_then_tunnel() -> None:
+        # give uvicorn a moment to bind before exposing it
+        task = asyncio.create_task(server.serve())
+        await asyncio.sleep(2)
+        await maybe_start_tunnel()
+        await task
+
     try:
-        await asyncio.gather(server.serve(), run_bot())
+        await asyncio.gather(serve_then_tunnel(), run_bot())
     finally:
+        await get_tunnel().stop()
         scheduler.shutdown(wait=False)
 
 

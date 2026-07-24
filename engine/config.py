@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8080
     secret_key: str = "dev-secret-change-me"
+    # Free Cloudflare Quick Tunnel: reach the dashboard from your phone without
+    # port forwarding. Refuses to start while DASHBOARD_PASSWORD is the default.
+    tunnel_enabled: bool = False
+    cloudflared_binary: str = ""
 
     report_time: str = "20:00"
     report_timezone: str = "UTC"
