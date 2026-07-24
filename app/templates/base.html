@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Growth Engine{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface-1: #1a1a19;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;  /* blue  — sends */
+      --series-2: #008300;  /* green — replies */
+      --status-good: #0ca30c;
+      --status-critical: #d03b3b;
+      --ord-1: #184f95; --ord-2: #256abf; --ord-3: #2a78d6; --ord-4: #3987e5; --ord-5: #5598e7;
+    }
+    body { background: var(--page); color: var(--text-primary);
+           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 0.75rem; }
+    .ink-2 { color: var(--text-secondary); }
+    .ink-m { color: var(--muted); }
+    a.nav-link { color: var(--text-secondary); }
+    a.nav-link:hover { color: var(--text-primary); }
+    a.nav-link.active { color: var(--text-primary); background: var(--surface-1); }
+    table th { color: var(--muted); font-weight: 500; }
+    tr.row { border-top: 1px solid var(--grid); }
+    tr.row:hover { background: var(--surface-1); }
+    input, select, textarea { background: var(--surface-1); border: 1px solid var(--grid);
+      color: var(--text-primary); border-radius: 0.5rem; padding: 0.375rem 0.625rem; }
+    .btn { border-radius: 0.5rem; padding: 0.375rem 0.875rem; font-size: 0.875rem;
+           border: 1px solid var(--border); }
+    .btn:hover { filter: brightness(1.15); }
+    .badge { font-size: 0.6875rem; padding: 0.125rem 0.5rem; border-radius: 999px;
+             border: 1px solid var(--border); color: var(--text-secondary); }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="flex min-h-screen">
+    <aside class="w-52 shrink-0 border-r p-4 flex flex-col gap-1" style="border-color: var(--border)">
+      <div class="mb-4">
+        <div class="font-semibold tracking-tight">Growth Engine</div>
+        <div class="text-xs ink-m">outbound machine</div>
+        <div class="mt-2 badge {% if stats and stats.mode == 'LIVE' %}!text-red-400{% endif %}">
+          {{ (stats.mode if stats else mode_label) or 'DRY_RUN' }}</div>
+        <div id="health-chips" class="mt-2 flex flex-wrap gap-1 text-[10px]"></div>
+      </div>
+      <script>
+        fetch('/healthz').then(r => r.json()).then(h => {
+          const chips = [];
+          if (h.paused) chips.push(['PAUSED', '#d03b3b']);
+          chips.push(['ollama ' + h.ollama, h.ollama === 'up' ? '#0ca30c' : '#d03b3b']);
+          chips.push(['smtp', h.smtp === 'configured' ? '#0ca30c' : '#898781']);
+          chips.push(['imap', h.imap === 'configured' ? '#0ca30c' : '#898781']);
+          chips.push(['bot', h.bot === 'configured' ? '#0ca30c' : '#898781']);
+          document.getElementById('health-chips').innerHTML = chips.map(([t, c]) =>
+            `<span class="badge" style="color:${c};border-color:${c}">${t}</span>`).join('');
+        }).catch(() => {});
+      </script>
+      {% for item in [('overview','/','Overview'),('leads','/leads','Leads'),
+                      ('outbox','/outbox','Outbox'),('activity','/activity','Activity'),
+                      ('settings','/settings','Settings'),('admin','/admin','Admin')] %}
+      <a href="{{ item[1] }}" class="nav-link rounded-lg px-3 py-2 text-sm {% if active == item[0] %}active{% endif %}">
+        {{ item[2] }}</a>
+      {% endfor %}
+      <div class="mt-auto pt-4 text-xs ink-m">
+        <a href="/logout" class="nav-link px-3">Log out</a>
+        <div class="px-3 mt-2">v{{ version }}</div>
+      </div>
+    </aside>
+    <main class="flex-1 p-6 overflow-x-auto">
+      {% if campaign_placeholder() %}
+      <div class="card p-3 mb-4 text-sm" style="border-color:#c98500">
+        This engine is running the <b>example campaign</b>. Configure your real
+        company, pitch and links in <a href="/admin/campaign" style="color:var(--series-1)">Admin &rarr; Campaign</a>.
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

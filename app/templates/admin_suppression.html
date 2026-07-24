@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Suppression — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Admin · Suppression</h1>
+<div class="ink-m text-xs mb-4">{{ total }} addresses suppressed forever. There is deliberately no delete button: honoring an opt-out is permanent by design. Removing an entry requires manual DB surgery, and that friction is the point.</div>
+{% include "_admin_nav.html" %}
+
+<div class="flex flex-wrap items-center gap-3 mb-4 text-sm">
+  <form method="get" action="/admin/suppression" class="flex gap-2">
+    <input name="q" value="{{ q }}" placeholder="Search email" class="w-56">
+    <button class="btn" style="background: var(--surface-1)">Search</button>
+  </form>
+  <form method="post" action="/admin/suppression/add" class="flex gap-2">
+    <input name="email" placeholder="email to suppress" class="w-56" required>
+    <input name="reason" placeholder="reason (optional)" class="w-40">
+    <button class="btn" style="background:#184f95;color:#fff">Suppress forever</button>
+  </form>
+  <a href="/admin/suppression/export.csv" class="btn ink-2" style="background: var(--page)">Export CSV</a>
+</div>
+
+<div class="card overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="px-4 py-3">Email</th><th class="px-2 py-3">Reason</th>
+      <th class="px-2 py-3">Added (UTC)</th>
+    </tr></thead>
+    <tbody>
+    {% for e in entries %}
+      <tr class="row">
+        <td class="px-4 py-2.5 font-medium">{{ e.email }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ e.reason }}</td>
+        <td class="px-2 py-2.5 ink-m text-xs">{{ e.added_at }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="px-4 py-8 text-center ink-m">
+        {{ 'No matches.' if q else 'Nothing suppressed yet.' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

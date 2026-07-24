@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Settings — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Settings</h1>
+<div class="ink-m text-xs mb-5">Read only in v1. Change values in .env and restart.</div>
+
+<div class="grid md:grid-cols-2 gap-4 max-w-3xl">
+  <div class="card p-4 text-sm">
+    <div class="ink-m text-xs mb-3">Engine</div>
+    <dl class="space-y-1.5">
+      <div class="flex justify-between"><dt class="ink-2">Mode</dt><dd class="font-medium">{{ s.engine_mode.upper() }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Paused</dt><dd>{{ 'YES' if paused else 'no' }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Writer model</dt><dd>{{ s.writer_model }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Classifier model</dt><dd>{{ s.classifier_model }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Ollama</dt><dd>{{ s.ollama_base_url }}</dd></div>
+    </dl>
+  </div>
+  <div class="card p-4 text-sm">
+    <div class="ink-m text-xs mb-3">Send rails (hard limits in code)</div>
+    <dl class="space-y-1.5">
+      <div class="flex justify-between"><dt class="ink-2">Warm-up</dt>
+        <dd>day 1-{{ warmup[0][0] }}: {{ warmup[0][1] }}/d · day {{ warmup[0][0]+1 }}-{{ warmup[1][0] }}: {{ warmup[1][1] }}/d · then {{ hard_max }}/d</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Configured cap</dt><dd>{{ s.daily_send_cap }}/day</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Window</dt><dd>{{ s.send_window_start }}-{{ s.send_window_end }} {{ s.send_timezone }}, Mon-Fri</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Jitter</dt><dd>{{ s.jitter_min_minutes }}-{{ s.jitter_max_minutes }} min</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Bounce breaker</dt><dd>&gt;{{ (s.bounce_breaker_rate * 100) | round(1) }}% over {{ s.bounce_breaker_window }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">SMTP</dt><dd>{{ s.smtp_host or 'not configured' }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">IMAP</dt><dd>{{ s.imap_host or 'not configured' }}</dd></div>
+    </dl>
+  </div>
+</div>
+{% endblock %}

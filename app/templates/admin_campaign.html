@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Campaign — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Admin · Campaign</h1>
+<div class="ink-m text-xs mb-4">Who is sending, what you sell, and the offer numbers. Every email and LLM prompt renders from this profile. Source: {{ source }}.</div>
+{% include "_admin_nav.html" %}
+
+{% if placeholder %}
+<div class="card p-3 mb-4 text-sm" style="border-color:#c98500">
+  This is still the <b>example campaign</b>. Fill in your real company below; drafts generated before saving will keep the example text.
+</div>
+{% endif %}
+
+<form method="post" action="/admin/campaign/save" class="card p-4 max-w-3xl">
+  <div class="grid md:grid-cols-2 gap-3 text-sm">
+    {% for key, label in fields %}
+    <div class="{% if key in ('product_pitch', 'signature', 'postal_address', 'job_value_by_trade', 'unsubscribe_line') %}md:col-span-2{% endif %}">
+      <label class="ink-m text-xs block mb-1">{{ label }}</label>
+      {% if key == 'product_pitch' %}
+      <textarea name="{{ key }}" rows="2" class="w-full text-sm">{{ values[key] }}</textarea>
+      {% else %}
+      <input name="{{ key }}" value="{{ values[key] }}" class="w-full text-sm">
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <button class="btn mt-4" style="background:#184f95;color:#fff">Save campaign</button>
+</form>
+{% endblock %}

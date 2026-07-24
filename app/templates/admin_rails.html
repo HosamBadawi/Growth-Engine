@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Rails — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Admin · Sending rails</h1>
+<div class="ink-m text-xs mb-4">Hard limits are code constants and cannot be raised from here or anywhere. These knobs can only tighten. Server clamps every value.</div>
+{% include "_admin_nav.html" %}
+
+<div class="grid md:grid-cols-2 gap-4 max-w-4xl">
+  <div class="card p-4 text-sm">
+    <div class="ink-m text-xs mb-3">Hard limits (read only, engine/config.py)</div>
+    <dl class="space-y-1.5">
+      <div class="flex justify-between"><dt class="ink-2">Warm-up by day</dt>
+        <dd>day 1-{{ hard.warmup[0][0] }}: {{ hard.warmup[0][1] }}/d · day {{ hard.warmup[0][0]+1 }}-{{ hard.warmup[1][0] }}: {{ hard.warmup[1][1] }}/d · then {{ hard.max_daily }}/d</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Warm-up by volume</dt>
+        <dd>&lt;{{ hard.volume[0][0] }} sends: {{ hard.volume[0][1] }}/d · &lt;{{ hard.volume[1][0] }}: {{ hard.volume[1][1] }}/d</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Max daily ever</dt><dd>{{ hard.max_daily }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Send window</dt><dd>{{ hard.window }}</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Jitter floor</dt><dd>{{ hard.jitter_min }} min</dd></div>
+      <div class="flex justify-between"><dt class="ink-2">Mode</dt>
+        <dd>{{ mode }} <span class="ink-m">(edit .env + restart; going LIVE must never be one browser click)</span></dd></div>
+    </dl>
+  </div>
+
+  <form method="post" action="/admin/rails/save" class="card p-4 text-sm">
+    <div class="ink-m text-xs mb-3">Tighten-only knobs (effective values shown)</div>
+    <div class="space-y-2.5">
+      <div class="flex justify-between items-center gap-2">
+        <label class="ink-2">Daily cap (≤ {{ hard.max_daily }})</label>
+        <input name="daily_send_cap" value="{{ eff.daily_cap }}" class="w-24 text-sm"></div>
+      <div class="flex justify-between items-center gap-2">
+        <label class="ink-2">Window start (≥ 09:00 ET)</label>
+        <input name="send_window_start" value="{{ eff.window_start }}" class="w-24 text-sm"></div>
+      <div class="flex justify-between items-center gap-2">
+        <label class="ink-2">Window end (≤ 16:30 ET)</label>
+        <input name="send_window_end" value="{{ eff.window_end }}" class="w-24 text-sm"></div>
+      <div class="flex justify-between items-center gap-2">
+        <label class="ink-2">Jitter min (≥ {{ hard.jitter_min }} min)</label>
+        <input name="jitter_min_minutes" value="{{ eff.jitter_min }}" class="w-24 text-sm"></div>
+      <div class="flex justify-between items-center gap-2">
+        <label class="ink-2">Jitter max (min)</label>
+        <input name="jitter_max_minutes" value="{{ eff.jitter_max }}" class="w-24 text-sm"></div>
+      <div class="flex justify-between items-center gap-2">
+        <label class="ink-2">Breaker rate (≤ env value)</label>
+        <input name="bounce_breaker_rate" value="{{ eff.breaker_rate }}" class="w-24 text-sm"></div>
+      <div class="flex justify-between items-center gap-2">
+        <label class="ink-2">Breaker window (≥ env value)</label>
+        <input name="bounce_breaker_window" value="{{ eff.breaker_window }}" class="w-24 text-sm"></div>
+    </div>
+    <button class="btn mt-4" style="background:#184f95;color:#fff">Save (clamped server side)</button>
+  </form>
+</div>
+{% endblock %}

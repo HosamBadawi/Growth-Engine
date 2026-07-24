@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sign in — Growth Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0d0d0d; color: #fff; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .card { background: #1a1a19; border: 1px solid rgba(255,255,255,0.10); }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center">
+  <form method="post" action="/login" class="card rounded-xl p-8 w-80">
+    <div class="font-semibold mb-1">Growth Engine</div>
+    <div class="text-xs mb-6" style="color:#898781">Local dashboard</div>
+    {% if error %}<div class="text-sm mb-3" style="color:#e66767">{{ error }}</div>{% endif %}
+    <input type="password" name="password" placeholder="Password" autofocus
+           class="w-full rounded-lg px-3 py-2 mb-4"
+           style="background:#0d0d0d;border:1px solid #2c2c2a;color:#fff">
+    <button class="w-full rounded-lg py-2 text-sm font-medium"
+            style="background:#3987e5;color:#fff">Sign in</button>
+  </form>
+</body>
+</html>

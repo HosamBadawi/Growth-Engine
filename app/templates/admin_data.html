@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Data — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Admin · Data tools</h1>
+<div class="ink-m text-xs mb-4">Exports, CSV import, and cleanup. The database itself lives at data/growth.db (nightly backups in data/backups/).</div>
+{% include "_admin_nav.html" %}
+
+<div class="grid md:grid-cols-3 gap-4 max-w-4xl">
+  <div class="card p-4 text-sm">
+    <div class="text-sm font-medium mb-3">Export CSV</div>
+    <div class="space-y-2">
+      <div><a href="/admin/data/export/prospects.csv" class="btn text-xs" style="background: var(--surface-1)">prospects.csv</a>
+        <span class="ink-m text-xs ml-2">{{ counts.prospects }} rows</span></div>
+      <div><a href="/admin/data/export/touches.csv" class="btn text-xs" style="background: var(--surface-1)">touches.csv</a>
+        <span class="ink-m text-xs ml-2">{{ counts.touches }} rows</span></div>
+      <div><a href="/admin/data/export/replies.csv" class="btn text-xs" style="background: var(--surface-1)">replies.csv</a>
+        <span class="ink-m text-xs ml-2">{{ counts.replies }} rows</span></div>
+    </div>
+  </div>
+
+  <div class="card p-4 text-sm">
+    <div class="text-sm font-medium mb-3">Import prospects CSV</div>
+    <div class="ink-m text-xs mb-2">Headers: name,category,phone,website,address,city,state,rating,review_count,email (only name required). Filters + dedupe apply.</div>
+    <form method="post" action="/admin/data/import" enctype="multipart/form-data" class="space-y-2">
+      <input type="file" name="file" accept=".csv" required class="text-xs w-full">
+      <input name="trade" placeholder="trade fallback (e.g. hvac)" class="w-full text-sm">
+      <button class="btn" style="background:#184f95;color:#fff">Import</button>
+    </form>
+  </div>
+
+  <div class="card p-4 text-sm">
+    <div class="text-sm font-medium mb-3">Cleanup</div>
+    <div class="ink-m text-xs mb-2">{{ dry_touches }} DRY_RUN touches in the database. Purging deletes them plus outbox .eml files and reverts affected prospects to VERIFIED.</div>
+    <form method="post" action="/admin/data/purge-dry"
+          onsubmit="return confirm('Delete all DRY_RUN artifacts? This cannot be undone.')">
+      <button class="btn" style="background: var(--page); color:#d03b3b">Purge DRY_RUN artifacts</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

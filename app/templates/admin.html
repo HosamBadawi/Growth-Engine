@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Admin — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Admin · Connections</h1>
+<div class="ink-m text-xs mb-4">Saved credentials, n8n style. One active per kind; .env is the fallback when none is active.</div>
+{% include "_admin_nav.html" %}
+
+<div class="flex gap-3 mb-6 text-xs">
+  <span class="badge">Telegram now: {{ telegram_source }} {{ '· ok' if telegram_ok else '· NOT CONFIGURED' }}</span>
+  <span class="badge">Email now: {{ email_source }} {{ '· ok' if email_ok else '· NOT CONFIGURED' }}</span>
+</div>
+
+{% for kind, title, note in [('TELEGRAM', 'Telegram bots', 'Activating a different bot: alerts switch immediately, bot commands need an engine restart.'),
+                             ('EMAIL', 'Email accounts (SMTP + IMAP + identity)', 'Applies immediately to sending, reply watching and the CAN-SPAM footer. Use a separate outreach domain to protect your main domain.')] %}
+<div class="card p-4 mb-5">
+  <div class="text-sm font-medium mb-1">{{ title }}</div>
+  <div class="ink-m text-xs mb-3">{{ note }}</div>
+
+  {% for row in rows if row.c.kind == kind %}
+  <div class="flex items-center gap-3 text-sm py-2" style="border-top:1px solid var(--grid)">
+    <span class="font-medium">{{ row.c.name }}</span>
+    {% if row.c.is_active %}<span class="badge" style="color:#0ca30c;border-color:#0ca30c">ACTIVE</span>{% endif %}
+    <span class="ink-m text-xs">{{ row.detail }}</span>
+    <div class="ml-auto flex gap-1.5">
+      <form method="post" action="/admin/connections/{{ row.c.id }}/test">
+        <button class="btn text-xs" style="background: var(--surface-1)">Test</button></form>
+      {% if not row.c.is_active %}
+      <form method="post" action="/admin/connections/{{ row.c.id }}/activate">
+        <button class="btn text-xs" style="background:#184f95;color:#fff">Activate</button></form>
+      {% else %}
+      <form method="post" action="/admin/connections/{{ row.c.id }}/deactivate">
+        <button class="btn text-xs ink-2" style="background: var(--page)">Deactivate</button></form>
+      {% endif %}
+      <form method="post" action="/admin/connections/{{ row.c.id }}/delete"
+            onsubmit="return confirm('Delete this connection?')">
+        <button class="btn text-xs" style="background: var(--page); color:#d03b3b">Delete</button></form>
+    </div>
+  </div>
+  {% else %}
+  <div class="ink-m text-sm py-2" style="border-top:1px solid var(--grid)">None saved yet.</div>
+  {% endfor %}
+
+  <details class="mt-3">
+    <summary class="cursor-pointer text-sm ink-2">+ Add {{ 'bot' if kind == 'TELEGRAM' else 'email account' }}</summary>
+    {% if kind == 'TELEGRAM' %}
+    <form method="post" action="/admin/telegram/add" class="grid md:grid-cols-3 gap-2 mt-3 text-sm">
+      <input name="name" placeholder="Name (e.g. main bot)" required>
+      <input name="token" placeholder="Bot token from @BotFather" required>
+      <input name="user_id" placeholder="Your numeric Telegram user id">
+      <button class="btn md:col-span-3 justify-self-start" style="background: var(--surface-1)">Save</button>
+    </form>
+    {% else %}
+    <form method="post" action="/admin/email/add" class="grid md:grid-cols-3 gap-2 mt-3 text-sm">
+      <input name="name" placeholder="Name (e.g. Zoho outreach)" required>
+      <input name="from_name" placeholder="From name" required>
+      <input name="from_email" placeholder="From email" required>
+      <input name="smtp_host" placeholder="SMTP host (smtp.zoho.com)" required>
+      <input name="smtp_port" placeholder="SMTP port" value="587">
+      <input name="smtp_user" placeholder="SMTP user" required>
+      <input name="smtp_password" type="password" placeholder="SMTP app password" required>
+      <input name="imap_host" placeholder="IMAP host (imap.zoho.com)">
+      <input name="imap_user" placeholder="IMAP user (blank = SMTP user)">
+      <input name="imap_password" type="password" placeholder="IMAP password (blank = SMTP)">
+      <input name="postal_address" placeholder="Postal address (CAN-SPAM footer)" class="md:col-span-2">
+      <button class="btn md:col-span-3 justify-self-start" style="background: var(--surface-1)">Save</button>
+    </form>
+    {% endif %}
+  </details>
+</div>
+{% endfor %}
+
+<div class="ink-m text-xs">Secrets are stored in the local SQLite database (data/growth.db). Keep this machine and the repo private; never commit data/.</div>
+{% endblock %}

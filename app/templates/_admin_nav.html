@@ -1,0 +1,17 @@
+<div class="flex flex-wrap gap-1.5 mb-5 text-sm">
+  {% for tab, href, label in [
+      ('connections', '/admin', 'Connections'),
+      ('models', '/admin/models', 'Models'),
+      ('campaign', '/admin/campaign', 'Campaign'),
+      ('rails', '/admin/rails', 'Rails'),
+      ('templates', '/admin/templates', 'Templates'),
+      ('prospector', '/admin/prospector', 'Prospector'),
+      ('suppression', '/admin/suppression', 'Suppression'),
+      ('data', '/admin/data', 'Data')] %}
+  <a href="{{ href }}" class="btn text-xs {% if admin_tab == tab %}font-semibold{% else %}ink-2{% endif %}"
+     style="background: {{ 'var(--surface-1)' if admin_tab == tab else 'var(--page)' }}">{{ label }}</a>
+  {% endfor %}
+</div>
+{% if msg %}
+<div class="card p-3 mb-4 text-sm" style="border-color:#3987e5">{{ msg }}</div>
+{% endif %}

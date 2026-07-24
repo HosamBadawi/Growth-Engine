@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Overview — Growth Engine{% endblock %}
+{% block content %}
+<meta http-equiv="refresh" content="30">
+<div class="flex items-baseline justify-between mb-5">
+  <h1 class="text-lg font-semibold">Overview</h1>
+  <div class="text-xs ink-m">auto refresh 30s{% if stats.paused %} · <span style="color:#d03b3b">PAUSED</span>{% endif %}</div>
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+  {% for label, value in [
+    ('Prospects found', stats.prospects_found), ('Enriched', stats.enriched),
+    ('Verified', stats.verified), ('Drafts pending', stats.drafts_pending),
+    ('Queued', stats.queued), ('Sent today', stats.sent_today),
+    ('Total sent', stats.total_sent), ('Replies', stats.replies_total),
+    ('Interested', stats.interested), ('Calls booked', stats.calls_booked)] %}
+  <div class="card p-4">
+    <div class="text-xs ink-m mb-1">{{ label }}</div>
+    <div class="text-2xl font-semibold">{{ value }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid md:grid-cols-2 gap-4 mb-4">
+  <div class="card p-4">
+    <div class="text-sm ink-2 mb-3">Funnel</div>
+    <div style="height:260px"><canvas id="funnel"></canvas></div>
+  </div>
+  <div class="card p-4">
+    <div class="text-sm ink-2 mb-3">Sends and replies per day (30 days)</div>
+    <div style="height:260px"><canvas id="daily"></canvas></div>
+  </div>
+</div>
+
+<div class="grid md:grid-cols-3 gap-4">
+  <div class="card p-4">
+    <div class="text-sm ink-2 mb-3">Bounce rate (trailing 50)</div>
+    <div class="flex items-center gap-5">
+      <div style="height:120px;width:120px"><canvas id="gauge"></canvas></div>
+      <div>
+        <div class="text-3xl font-semibold"
+             style="color: {{ '#d03b3b' if stats.bounce_rate > 3 else '#0ca30c' }}">
+          {{ stats.bounce_rate }}%</div>
+        <div class="text-xs ink-m mt-1">breaker pauses sending above 3%</div>
+      </div>
+    </div>
+  </div>
+  <div class="card p-4 md:col-span-2">
+    <div class="text-sm ink-2 mb-3">Replies by class</div>
+    <div class="flex flex-wrap gap-3">
+      {% for cls in ['INTERESTED','QUESTION','NOT_NOW','UNSUBSCRIBE','AUTO_REPLY','BOUNCE'] %}
+      <div class="badge">{{ cls }} · {{ stats.replies_by_class.get(cls, 0) }}</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<script>
+const ink2 = '#c3c2b7', muted = '#898781', grid = '#2c2c2a';
+Chart.defaults.color = muted;
+Chart.defaults.borderColor = grid;
+Chart.defaults.font.family = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+
+const funnel = {{ funnel | tojson }};
+new Chart(document.getElementById('funnel'), {
+  type: 'bar',
+  data: { labels: funnel.labels, datasets: [{
+    data: funnel.values,
+    backgroundColor: ['#184f95', '#256abf', '#2a78d6', '#3987e5', '#5598e7'],
+    borderRadius: 4, borderSkipped: false, barThickness: 22,
+  }]},
+  options: {
+    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { x: { grid: { color: grid }, beginAtZero: true, ticks: { precision: 0 } },
+              y: { grid: { display: false }, ticks: { color: ink2 } } },
+  },
+});
+
+const series = {{ series | tojson }};
+new Chart(document.getElementById('daily'), {
+  type: 'line',
+  data: { labels: series.labels.map(d => d.slice(5)), datasets: [
+    { label: 'Sent', data: series.sent, borderColor: '#3987e5',
+      backgroundColor: '#3987e5', borderWidth: 2, pointRadius: 0,
+      pointHitRadius: 12, tension: 0.25 },
+    { label: 'Replies', data: series.replies, borderColor: '#008300',
+      backgroundColor: '#008300', borderWidth: 2, pointRadius: 0,
+      pointHitRadius: 12, tension: 0.25 },
+  ]},
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { position: 'bottom', labels: { color: ink2, boxWidth: 10 } } },
+    scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+              y: { grid: { color: grid }, beginAtZero: true, ticks: { precision: 0 } } },
+  },
+});
+
+const bounceRate = {{ stats.bounce_rate | tojson }};
+new Chart(document.getElementById('gauge'), {
+  type: 'doughnut',
+  data: { labels: ['Bounce', 'Clean'], datasets: [{
+    data: [Math.min(bounceRate, 10), Math.max(10 - Math.min(bounceRate, 10), 0)],
+    backgroundColor: [bounceRate > 3 ? '#d03b3b' : '#0ca30c', grid],
+    borderWidth: 2, borderColor: '#1a1a19',
+  }]},
+  options: { responsive: true, maintainAspectRatio: false, cutout: '72%',
+             plugins: { legend: { display: false }, tooltip: { enabled: false } } },
+});
+</script>
+{% endblock %}

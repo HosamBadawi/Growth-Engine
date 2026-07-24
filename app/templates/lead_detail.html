@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }} — Growth Engine{% endblock %}
+{% block content %}
+<a href="/leads" class="text-xs ink-m">&larr; Leads</a>
+<div class="flex items-baseline gap-3 mt-2 mb-5">
+  <h1 class="text-lg font-semibold">{{ p.name }}</h1>
+  <span class="badge">{{ p.status }}</span>
+  <span class="badge">{{ p.email_verification_level }}</span>
+</div>
+
+<div class="grid md:grid-cols-3 gap-4 mb-4">
+  <div class="card p-4 text-sm">
+    <div class="ink-m text-xs mb-2">Contact</div>
+    <div>{{ (p.city or '?') | title }}{% if p.state %}, {{ p.state }}{% endif %} · {{ p.trade }}</div>
+    <div class="ink-2 mt-1">{{ p.email or 'no email' }}</div>
+    <div class="ink-2">{{ p.phone or '' }}</div>
+    {% if p.owner_name %}<div class="ink-2 mt-1">Owner: {{ p.owner_name }}</div>{% endif %}
+    {% if p.website %}<div class="mt-1"><a href="{{ p.website }}" target="_blank" style="color: var(--series-1)">{{ p.website }}</a></div>{% endif %}
+    {% if p.contact_form_url %}<div class="mt-1"><a href="{{ p.contact_form_url }}" target="_blank" style="color: var(--series-1)">Contact form</a></div>{% endif %}
+    {% if p.maps_url %}<div class="mt-1"><a href="{{ p.maps_url }}" target="_blank" class="ink-m">Google Maps</a></div>{% endif %}
+    <div class="ink-m text-xs mt-2">{{ p.review_count or '?' }} reviews · rating {{ p.rating or '?' }} · via {{ p.source }}</div>
+  </div>
+
+  <div class="card p-4 text-sm md:col-span-2">
+    <div class="ink-m text-xs mb-2">Intel card</div>
+    {% set card = p.intel_json.get('card') if p.intel_json else none %}
+    {% if card %}
+      <ul class="list-disc ml-4 space-y-1">
+        {% for b in card.get('bullets', []) %}<li>{{ b }}</li>{% endfor %}
+      </ul>
+      <div class="ink-2 mt-2">Human detail: {{ card.get('human_detail', '') }}</div>
+      <div class="ink-2">Pain signal: {{ card.get('pain_signal', '') }}</div>
+    {% else %}<div class="ink-m">No intel card yet (generated at /draft time).</div>{% endif %}
+    {% if p.intel_json %}
+    <div class="flex gap-2 mt-3">
+      {% if p.intel_json.get('has_chat_widget') is not none %}
+        <span class="badge">chat widget: {{ 'yes' if p.intel_json.get('has_chat_widget') else 'NO (good)' }}</span>
+        <span class="badge">online booking: {{ 'yes' if p.intel_json.get('has_online_booking') else 'NO (good)' }}</span>
+      {% endif %}
+      {% if p.intel_json.get('years_in_business') %}<span class="badge">{{ p.intel_json.get('years_in_business') }}</span>{% endif %}
+      {% if p.intel_json.get('family_owned') %}<span class="badge">family owned</span>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if next_touch %}
+<div class="card p-4 mb-4 text-sm">
+  <span class="ink-m text-xs">Next scheduled:</span>
+  {{ next_touch.type }} at {{ next_touch.scheduled_at }} UTC
+</div>
+{% endif %}
+
+<div class="card p-4 mb-4">
+  <div class="ink-m text-xs mb-3">Touches</div>
+  {% for t in p.touches %}
+  <details class="mb-2 text-sm">
+    <summary class="cursor-pointer">
+      <span class="badge">{{ t.type }}</span> <span class="badge">{{ t.status }}</span>
+      <span class="ink-2 ml-2">{{ t.subject }}</span>
+      <span class="ink-m text-xs ml-2">{{ t.sent_at or t.scheduled_at or t.created_at }}</span>
+    </summary>
+    <pre class="whitespace-pre-wrap ink-2 mt-2 p-3 rounded-lg text-xs" style="background: var(--page)">{{ t.body }}</pre>
+  </details>
+  {% else %}<div class="ink-m text-sm">No touches yet.</div>{% endfor %}
+</div>
+
+<div class="card p-4">
+  <div class="ink-m text-xs mb-3">Replies</div>
+  {% for r in p.replies %}
+  <div class="mb-3 text-sm">
+    <span class="badge">{{ r.classification }}</span>
+    <span class="ink-m text-xs ml-2">{{ r.received_at }}</span>
+    <pre class="whitespace-pre-wrap ink-2 mt-1 p-3 rounded-lg text-xs" style="background: var(--page)">{{ r.raw_text[:2000] }}</pre>
+  </div>
+  {% else %}<div class="ink-m text-sm">No replies yet.</div>{% endfor %}
+</div>
+{% endblock %}
