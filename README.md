@@ -4,12 +4,12 @@
 
 An open-source AI outbound machine: find prospect clients, research them, write
 personalized emails with **local or API LLMs**, send safely behind hard
-deliverability rails, watch replies, and track everything — commanded from
+deliverability rails, watch replies, and track everything  commanded from
 Telegram, observed on a local web dashboard.
 
 Runs 100% free on a local [Ollama](https://ollama.com) model out of the box; plug
 in OpenAI, Anthropic, OpenRouter, Groq, or any OpenAI-compatible API from the
-dashboard when you want to. Defaults to `DRY_RUN` — it writes `.eml` files to
+dashboard when you want to. Defaults to `DRY_RUN`  it writes `.eml` files to
 `/outbox` and sends nothing until you deliberately go live.
 
 ```
@@ -21,7 +21,7 @@ TELEGRAM BOT (aiogram 3) ──► ORCHESTRATOR (FastAPI + APScheduler)
 
 ## Features
 
-- **Multi-provider LLM layer** — local Ollama by default (zero config, zero cost);
+- **Multi-provider LLM layer**  local Ollama by default (zero config, zero cost);
   add OpenAI / Anthropic / OpenRouter / Groq / any OpenAI-compatible endpoint from
   Admin → Models, assignable per role (writer / classifier / researcher). API
   providers are cost-guarded with a daily call cap and automatic fallback to local.
@@ -29,20 +29,20 @@ TELEGRAM BOT (aiogram 3) ──► ORCHESTRATOR (FastAPI + APScheduler)
   (public records, zero-risk, the default), a Google Maps scraper, or CSV import.
 - **Enricher** crawls each prospect's site (robots-aware) for emails, owner names,
   and negative signals (no chat widget / no online booking = a better prospect).
-- **Verifier** — syntax → MX → optional SMTP probe, with graceful port-25
+- **Verifier**  syntax → MX → optional SMTP probe, with graceful port-25
   degradation. Unverifiable addresses are never sent to.
-- **Researcher** — summarize the scraped site (local) or run real web deep-research
+- **Researcher**  summarize the scraped site (local) or run real web deep-research
   per prospect (web mode), distilled into a 3-bullet intel card.
-- **Writer** — personalized cold emails from your campaign profile + templates,
+- **Writer**  personalized cold emails from your campaign profile + templates,
   with machine-enforced style rules and a deterministic template fallback.
 - **Sender** with sacred deliverability rails (below), warm-up ramp, send window,
   jitter, suppression, bounce circuit breaker, and Day 0/3/6/10 sequences that
   cancel the instant a reply arrives.
-- **Reply watcher** — IMAP poll → LLM classification → Telegram alert with a
+- **Reply watcher**  IMAP poll → LLM classification → Telegram alert with a
   suggested reply you approve, edit, or ignore.
-- **Full admin dashboard** — models, campaign profile, sending rails (tighten-only),
+- **Full admin dashboard**  models, campaign profile, sending rails (tighten-only),
   email templates with live preview, prospector, suppression, data tools, health.
-- **Telegram command center** — run the whole machine from your phone.
+- **Telegram command center**  run the whole machine from your phone.
 
 ## Quickstart
 
@@ -75,7 +75,7 @@ python run.py
 Dashboard: <http://localhost:8080> (password = `DASHBOARD_PASSWORD`). On first run
 the engine verifies your models exist in Ollama and prints tokens/sec so you can
 tune. Telegram and email are optional and configured from **Admin → Connections**
-(saved in the local DB, n8n style) — the dashboard and CLI work without them.
+(saved in the local DB, n8n style)  the dashboard and CLI work without them.
 
 Then open **Admin → Campaign** and fill in your company, pitch, links, and
 signature. Until you do, the engine runs a clearly-marked example campaign and
@@ -88,14 +88,14 @@ the bootstrap fallbacks and the few things that must not be one browser click aw
 
 | Key | What |
 |---|---|
-| `ENGINE_MODE` | `DRY_RUN` (default) / `SANDBOX` / `LIVE` — **`.env` only, by design** |
+| `ENGINE_MODE` | `DRY_RUN` (default) / `SANDBOX` / `LIVE`  **`.env` only, by design** |
 | `DATABASE_URL` | SQLite by default; Postgres-ready |
 | `OLLAMA_BASE_URL` | local Ollama endpoint |
 | `WRITER_MODEL` / `CLASSIFIER_MODEL` / `RESEARCHER_MODEL` | default local models per role |
 | `API_DAILY_CALL_CAP` | max calls/day per API provider, then local fallback |
 | `RESEARCH_MODE` | `local` (summarize site) or `web` (real deep research) |
 | `DASHBOARD_PASSWORD` / `SECRET_KEY` | dashboard login + cookie signing |
-| `DASHBOARD_HOST` | `127.0.0.1` by default — see security notes |
+| `DASHBOARD_HOST` | `127.0.0.1` by default  see security notes |
 
 Telegram bots, email accounts (SMTP + IMAP + sender identity), LLM providers, and
 the campaign profile are all managed in the Admin panel and stored in the local
@@ -103,15 +103,15 @@ database, with `.env` as the fallback.
 
 ## Prospect sources
 
-- **Registry (default)** — US state contractor license registries (public records,
+- **Registry (default)**  US state contractor license registries (public records,
   bulk CSV, no scraping). Ships with Florida; adding a state is one entry in
   `engine/providers/registry.py`.
-- **Google Maps** — wraps the MIT `gosom/google-maps-scraper` binary as a
+- **Google Maps**  wraps the MIT `gosom/google-maps-scraper` binary as a
   subprocess. Download the release for your OS into `bin/` and set
   `PROSPECT_PROVIDER=gosom`. Note: Google fingerprints headless automation, so this
   is most reliable from a US residential/VPS egress; some networks see it fail with
   `unexpected page type`.
-- **CSV import** — bring any list: `find "csv:path/to/leads.csv" "-" 50`, or import
+- **CSV import**  bring any list: `find "csv:path/to/leads.csv" "-" 50`, or import
   from Admin → Data.
 
 ## Safety rails (hard-coded, env can only tighten)
@@ -181,16 +181,11 @@ Schema migrations run automatically at startup (Alembic). A nightly job backs up
 the SQLite database to `data/backups/`. `GET /healthz` returns engine status JSON
 (localhost, no auth).
 
-## Screenshots
-
-<!-- Add dashboard screenshots here: Overview, Leads, Admin → Models, Admin → Campaign -->
-_Overview · Leads · Admin panel — add images here._
-
 ## Responsible use
 
 This is a tool for **legitimate B2B outreach**. You are responsible for complying
-with the laws of your jurisdiction and your recipients' — including the US CAN-SPAM
-Act and similar regulations — for honoring opt-outs promptly (the engine suppresses
+with the laws of your jurisdiction and your recipients'  including the US CAN-SPAM
+Act and similar regulations  for honoring opt-outs promptly (the engine suppresses
 them forever automatically), and for respecting the terms of service of every data
 source you configure. Cold outreach carries legal and reputational risk; the safety
 rails reduce it but do not remove your responsibility. Do not use this for spam.
@@ -200,12 +195,12 @@ rails reduce it but do not remove your responsibility. Do not use this for spam.
 - API keys and SMTP/IMAP passwords are stored in the local SQLite database
   (`data/growth.db`), like any self-hosted tool. Keep that machine and file private.
 - The dashboard binds `127.0.0.1` by default. For remote access use a private
-  network overlay (Tailscale, WireGuard) — never bind it to a public interface.
+  network overlay (Tailscale, WireGuard)  never bind it to a public interface.
 - Never commit your `.env` or `data/` directory. Both are gitignored.
 
 ## Architecture notes
 
-- Every LLM call goes through `engine/llm/` — swap providers without touching call
+- Every LLM call goes through `engine/llm/`  swap providers without touching call
   sites. Every prospect source implements `ProspectProvider`. The sender/bot can
   later move to a small VPS while Ollama stays on your PC (set `OLLAMA_BASE_URL` to
   your PC's private-network IP).
@@ -213,4 +208,4 @@ rails reduce it but do not remove your responsibility. Do not use this for spam.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT  see [LICENSE](LICENSE).
