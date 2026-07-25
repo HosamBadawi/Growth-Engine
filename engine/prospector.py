@@ -1,5 +1,6 @@
 """Module 1 — Prospector: find businesses, apply code-level filters, store NEW prospects."""
 import logging
+from typing import Callable
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -7,9 +8,17 @@ from sqlalchemy.orm import Session
 from db.models import Prospect, ProspectStatus
 from engine.events import log_event
 from engine.providers import get_provider
-from engine.providers.base import RawProspect
+from engine.providers.base import RawProspect, make_dedupe_key
 
 log = logging.getLogger("prospector")
+
+
+def known_dedupe_keys(session: Session) -> set[str]:
+    """Every dedupe key already in the database — one cheap indexed query."""
+    rows = session.execute(
+        select(Prospect.dedupe_key).where(Prospect.dedupe_key.isnot(None))
+    ).scalars().all()
+    return {k for k in rows if k}
 
 
 def _filter_reason(raw: RawProspect) -> str | None:
@@ -41,19 +50,26 @@ def _is_duplicate(session: Session, raw: RawProspect) -> bool:
 
 
 def run_prospecting(
-    session: Session, trade: str, city: str, limit: int, query: str | None = None
+    session: Session, trade: str, city: str, limit: int, query: str | None = None,
+    provider_name: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict:
     """Search, filter, dedupe and insert prospects. Returns a summary dict."""
     from engine.prospector_settings import eff_provider
 
     provider = get_provider(
-        "csv" if (query or "").startswith("csv:") else eff_provider()
+        provider_name or ("csv" if (query or "").startswith("csv:") else eff_provider())
     )
     search_query = query or f"{trade} {city}"
     log_event(session, "prospector", f"Searching '{search_query}' via {provider.name}")
 
-    raws = provider.search(search_query, limit)
-    summary = {"found": len(raws), "kept": 0, "skipped": {}, "duplicates": 0}
+    exclude_keys = known_dedupe_keys(session)
+    raws = provider.search(search_query, limit, exclude_keys=exclude_keys,
+                           progress=progress)
+    skipped_known = getattr(provider, "last_skipped_known", 0)
+    exhausted = bool(getattr(provider, "last_exhausted", False))
+    summary = {"found": len(raws), "kept": 0, "skipped": {}, "duplicates": 0,
+               "skipped_known": skipped_known, "exhausted": exhausted}
 
     for raw in raws:
         if summary["kept"] >= limit:
@@ -83,6 +99,7 @@ def run_prospecting(
             rating=raw.rating,
             review_count=raw.review_count,
             owner_name=raw.owner_name or None,
+            dedupe_key=make_dedupe_key(raw.license_no, raw.name, raw.city or city),
             email=(raw.emails[0].lower() if raw.emails else None),
             source=raw.source or provider.name,
             status=ProspectStatus.NEW,
@@ -95,7 +112,9 @@ def run_prospecting(
     log_event(
         session, "prospector",
         f"Query '{search_query}': found {summary['found']}, kept {summary['kept']}, "
-        f"dupes {summary['duplicates']}, skipped {sum(summary['skipped'].values())}",
+        f"dupes {summary['duplicates']}, skipped known {summary['skipped_known']}, "
+        f"filtered {sum(summary['skipped'].values())}"
+        + (" — source EXHAUSTED for this query" if exhausted else ""),
         meta=summary,
     )
     return summary

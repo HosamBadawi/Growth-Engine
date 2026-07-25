@@ -6,8 +6,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.routes.actions import router as actions_router
 from app.routes.admin import router as admin_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.pipeline_ui import router as pipeline_router
 from engine import __version__
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -26,6 +28,8 @@ STATIC_DIR.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(dashboard_router)
 app.include_router(admin_router)
+app.include_router(pipeline_router)
+app.include_router(actions_router)
 
 
 @app.get("/healthz")

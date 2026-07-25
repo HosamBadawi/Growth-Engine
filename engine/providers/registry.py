@@ -166,19 +166,24 @@ def ensure_extract(source: RegistrySource) -> Path:
     return path
 
 
-def _rows_for_trade(source: RegistrySource, trade: str, city: str,
-                    limit: int) -> list[RawProspect]:
+def _iter_rows_for_trade(source: RegistrySource, trade: str, city: str,
+                         seen: set[str]):
+    """Lazily yield every matching business in the extract.
+
+    A generator instead of a capped list: with dedupe exclusion in front of
+    website discovery, any fixed headroom multiplier can be consumed entirely
+    by already-known businesses. Lazy iteration walks as deep as needed and
+    stops naturally when the caller has enough or the file ends.
+    """
     prefixes = None
     for key, pset in source.trade_prefixes.items():
         if key in trade or trade in key:
             prefixes = pset
             break
     if prefixes is None:
-        return []
+        return
     path = ensure_extract(source)
     city_u = city.upper().strip()
-    out: list[RawProspect] = []
-    seen: set[str] = set()
     max_cols = max(source.col_license, source.col_status, source.col_zip) + 1
 
     with open(path, encoding="latin-1", newline="") as fh:
@@ -196,11 +201,7 @@ def _rows_for_trade(source: RegistrySource, trade: str, city: str,
             if not business or business.upper() in _DBA_PLACEHOLDERS:
                 continue  # individual qualifier without a real DBA; we want businesses
             license_no = row[source.col_license].strip()
-            dedupe = license_no or f"{business}|{row[source.col_city]}"
-            if dedupe in seen:
-                continue
-            seen.add(dedupe)
-            out.append(RawProspect(
+            raw = RawProspect(
                 name=_title_case_business(business),
                 category=trade,
                 city=row[source.col_city].strip().title(),
@@ -214,13 +215,17 @@ def _rows_for_trade(source: RegistrySource, trade: str, city: str,
                 source=f"registry:{source.state}",
                 owner_name=_title_case_owner(owner) if owner else "",
                 license_no=license_no,
-            ))
-            if len(out) >= limit * 4:  # headroom for website-discovery misses
-                break
-    return out
+            )
+            if raw.dedupe_key in seen:
+                continue  # duplicate row within/across extracts
+            seen.add(raw.dedupe_key)
+            yield raw
 
 
 _WEBSITE_CACHE_FILE = REGISTRY_DIR / "website_cache.json"
+_MISS_CACHE_FILE = REGISTRY_DIR / "website_misses.json"
+_MISS_TTL_DAYS = 30
+_FLUSH_EVERY = 10  # persist mid-run so an interrupt never loses discovered domains
 
 
 def _load_website_cache() -> dict:
@@ -234,11 +239,45 @@ def _load_website_cache() -> dict:
     return {}
 
 
-def _save_website_cache(cache: dict) -> None:
+def _atomic_write_json(path: Path, data: dict) -> None:
     import json
+    import os
 
     REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
-    _WEBSITE_CACHE_FILE.write_text(json.dumps(cache, indent=0), encoding="utf-8")
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=0), encoding="utf-8")
+    os.replace(tmp, path)  # atomic: an interrupt mid-write can't corrupt the file
+
+
+def _save_website_cache(cache: dict) -> None:
+    _atomic_write_json(_WEBSITE_CACHE_FILE, cache)
+
+
+def _load_miss_cache() -> dict:
+    """{dedupe_key: iso_timestamp} of businesses recently found to have no site."""
+    if not _MISS_CACHE_FILE.exists():
+        return {}
+    try:
+        import json
+
+        raw = json.loads(_MISS_CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    cutoff = utcnow().timestamp() - _MISS_TTL_DAYS * 86400
+    fresh = {}
+    for key, ts in raw.items():
+        try:
+            from datetime import datetime
+
+            if datetime.fromisoformat(ts).timestamp() >= cutoff:
+                fresh[key] = ts
+        except (ValueError, TypeError):
+            continue
+    return fresh
+
+
+def _save_miss_cache(misses: dict) -> None:
+    _atomic_write_json(_MISS_CACHE_FILE, misses)
 
 
 def _first_allowed(hrefs: list[str]) -> str:
@@ -283,7 +322,8 @@ def guess_domain(client: httpx.Client, business: str) -> str:
         if not (3 <= len(cand) <= 40):
             continue
         try:
-            resp = client.get(f"https://{cand}.com", timeout=6, follow_redirects=True)
+            # 3s: these hosts are alive or not; a longer wait buys nothing.
+            resp = client.get(f"https://{cand}.com", timeout=3, follow_redirects=True)
             if resp.status_code == 200 and any(
                 t in resp.text[:8000].lower() for t in verify_tokens
             ):
@@ -302,30 +342,45 @@ _SEARCH_BACKENDS = ["google", "brave", "duckduckgo", "mojeek", "yahoo"]
 
 def search_website(ddgs_client, business: str, city: str, state: str,
                    index: int) -> str:
-    """One paced lookup, rotating engines so no single one absorbs the batch."""
+    """One paced lookup, rotating engines so no single one absorbs the batch.
+
+    Cost-capped: primary backend, then ONE alternate after a short pause, then
+    give up on this business. The old 15s->30s->60s escalation spent up to a
+    minute on what is usually an empty result; the miss cache (30-day TTL)
+    means we won't re-search it for a month anyway.
+    """
     query = f"{business} {city} {state}"
-    delay = 15
     backend = _SEARCH_BACKENDS[index % len(_SEARCH_BACKENDS)]
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             results = ddgs_client.text(query, backend=backend, max_results=3)
             hrefs = [r.get("href", "") for r in (results or [])]
             return _first_allowed(hrefs)
-        except Exception as exc:  # noqa: BLE001 — ratelimit/timeout: back off, rotate
+        except Exception as exc:  # noqa: BLE001 — ratelimit/timeout: rotate once
             log.debug("search backend %s failed for %s: %s", backend, business, exc)
-            time.sleep(delay + random.uniform(0, 3))
-            delay *= 2
-            backend = _SEARCH_BACKENDS[(index + attempt + 1) % len(_SEARCH_BACKENDS)]
+            if attempt == 0:
+                time.sleep(8 + random.uniform(0, 3))
+                backend = _SEARCH_BACKENDS[(index + 1) % len(_SEARCH_BACKENDS)]
     return ""
 
 
 class RegistryProvider(ProspectProvider):
     name = "registry"
 
-    def search(self, query: str, limit: int) -> list[RawProspect]:
+    def __init__(self) -> None:
+        self.last_skipped_known = 0
+        self.last_exhausted = False
+
+    def search(self, query: str, limit: int,
+               exclude_keys: set[str] | None = None,
+               progress=None) -> list[RawProspect]:
         from engine.prospector_settings import eff_registry_state
 
         settings = get_settings()
+        exclude_keys = exclude_keys or set()
+        self.last_skipped_known = 0
+        self.last_exhausted = False
+
         trade, city, state = parse_registry_query(query, eff_registry_state())
         sources = STATE_SOURCES.get(state)
         if not sources:
@@ -334,46 +389,97 @@ class RegistryProvider(ProspectProvider):
                 f"Configured: {list(STATE_SOURCES)}. Use another provider or add it."
             )
 
-        candidates: list[RawProspect] = []
-        for source in sources:
-            candidates.extend(_rows_for_trade(source, trade, city, limit))
-        log.info("Registry %s: %d licensed '%s' businesses in %s before website discovery",
-                 state, len(candidates), trade, city or "state")
+        def emit(text: str) -> None:
+            log.info(text)
+            if progress:
+                try:
+                    progress(text)
+                except Exception:  # noqa: BLE001 — progress is best-effort
+                    pass
 
         discover = settings.registry_discover_websites
         cache = _load_website_cache()
+        misses = _load_miss_cache() if discover else {}
         results: list[RawProspect] = []
-        stats = {"cached": 0, "guessed": 0, "searched": 0, "miss": 0}
+        stats = {"cached": 0, "guessed": 0, "searched": 0, "miss": 0, "known_miss": 0}
+        checked = 0
+        dirty = 0
+        started = time.monotonic()
         ddgs_client = None
-        with httpx.Client(headers={"User-Agent": USER_AGENT}) as client:
-            for i, raw in enumerate(candidates):
-                if len(results) >= limit:
-                    break
-                if discover:
-                    key = raw.license_no or f"{raw.name}|{raw.city}"
-                    if key in cache:
-                        raw.website = cache[key]
-                        stats["cached"] += 1
-                    else:
-                        raw.website = guess_domain(client, raw.name)
-                        if raw.website:
-                            stats["guessed"] += 1
-                        else:
-                            if ddgs_client is None:
-                                from ddgs import DDGS
+        seen: set[str] = set()
 
-                                ddgs_client = DDGS(timeout=8)  # ONE instance, reused
-                            raw.website = search_website(ddgs_client, raw.name,
-                                                         raw.city, raw.state, i)
-                            stats["searched" if raw.website else "miss"] += 1
-                            time.sleep(4 + random.uniform(0, 1.5))
-                        if raw.website:
-                            cache[key] = raw.website  # only cache hits; misses retry
-                    if not raw.website:
-                        continue  # no website = no email path; skip for now
-                results.append(raw)
-        if discover:
-            _save_website_cache(cache)
-        log.info("Registry %s: %d prospects with a website (%s)", state,
-                 len(results), stats)
+        def flush() -> None:
+            if discover:
+                _save_website_cache(cache)
+                _save_miss_cache(misses)
+
+        try:
+            with httpx.Client(headers={"User-Agent": USER_AGENT}) as client:
+                exhausted_sources = 0
+                for source in sources:
+                    source_done = True
+                    for raw in _iter_rows_for_trade(source, trade, city, seen):
+                        if len(results) >= limit:
+                            source_done = False
+                            break
+
+                        # Cheap exclusion BEFORE any network work — the whole point.
+                        if raw.dedupe_key in exclude_keys:
+                            self.last_skipped_known += 1
+                            continue
+
+                        if not discover:
+                            results.append(raw)
+                            continue
+
+                        key = raw.dedupe_key
+                        checked += 1
+                        if key in cache:
+                            raw.website = cache[key]
+                            stats["cached"] += 1
+                        elif key in misses:
+                            stats["known_miss"] += 1  # no site last month; skip cheaply
+                        else:
+                            raw.website = guess_domain(client, raw.name)
+                            if raw.website:
+                                stats["guessed"] += 1
+                            else:
+                                if ddgs_client is None:
+                                    from ddgs import DDGS
+
+                                    ddgs_client = DDGS(timeout=8)  # ONE instance
+                                raw.website = search_website(
+                                    ddgs_client, raw.name, raw.city, raw.state, checked)
+                                stats["searched" if raw.website else "miss"] += 1
+                                time.sleep(4 + random.uniform(0, 1.5))
+                            if raw.website:
+                                cache[key] = raw.website
+                            else:
+                                misses[key] = utcnow().isoformat()
+                            dirty += 1
+                            if dirty >= _FLUSH_EVERY:
+                                flush()  # survive Ctrl-C / crash mid-run
+                                dirty = 0
+
+                        if checked % _FLUSH_EVERY == 0:
+                            per = (time.monotonic() - started) / max(checked, 1)
+                            remaining = max(limit - len(results), 0)
+                            eta_min = int(per * remaining * 2 / 60)  # rough, honest
+                            emit(f"Discovering websites: {checked} checked, "
+                                 f"{len(results)} found"
+                                 + (f", ~{eta_min} min left" if eta_min else ""))
+
+                        if not raw.website:
+                            continue  # no website = no email path
+                        results.append(raw)
+                    if source_done:
+                        exhausted_sources += 1
+                self.last_exhausted = (exhausted_sources == len(sources)
+                                       and len(results) < limit)
+        finally:
+            flush()  # always persist, even on interrupt
+
+        log.info("Registry %s: %d prospects with a website (%s, skipped known %d%s)",
+                 state, len(results), stats, self.last_skipped_known,
+                 ", source exhausted" if self.last_exhausted else "")
         return results

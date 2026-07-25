@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.1.0 — 2026-07-25
+
+- **Dedupe exclusion**: `/find` skips already-imported businesses *before* paying
+  for website discovery (new indexed `dedupe_key` column, backfilled by
+  migration 0002; lazy registry iteration; `skipped known` in run summaries;
+  clear exhaustion message when a city runs dry).
+- **Discovery robustness**: website cache flushes atomically every 10
+  resolutions and on interrupt; 30-day negative cache for businesses with no
+  findable site; live progress lines during long discovery runs; cheaper miss
+  path (3s domain probes, search backoff capped at one alternate engine).
+- **Pipeline-stage UI**: Leads replaced by Prospects / Drafts / In Sequence /
+  Replies / Closed — every prospect on exactly one page, stages derived live,
+  global cross-stage search, count badges.
+- **Web parity**: Actions page runs find (with live progress), drafting,
+  queueing, pause/resume from the browser. Going LIVE still requires the
+  Telegram confirmation — dual-channel by design.
+- **New providers**: `osm` (OpenStreetMap/Overpass — free, keyless, worldwide,
+  any niche) and `places` (Google Places API — field-masked, hard daily cap,
+  SKU-logged). Per-run provider picker with availability status.
+
 ## 2.0.0 — 2026-07-24
 
 - **Multi-provider LLM layer**: local Ollama by default; OpenAI / Anthropic /

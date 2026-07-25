@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ labels[stage] }} — Growth Engine{% endblock %}
+{% block content %}
+{% include "_pipeline_nav.html" %}
+
+<div class="card overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="px-4 py-3">Name</th>
+      <th class="px-2 py-3">Trade / City</th>
+      <th class="px-2 py-3">Contact</th>
+      {% if stage == 'in_sequence' %}
+      <th class="px-2 py-3">Sequence</th><th class="px-2 py-3">Next touch (UTC)</th>
+      {% elif stage == 'replies' %}
+      <th class="px-2 py-3">Last reply</th><th class="px-2 py-3">Class</th>
+      {% elif stage == 'closed' %}
+      <th class="px-2 py-3">Reason</th>
+      {% elif stage == 'drafts' %}
+      <th class="px-2 py-3">Draft</th><th class="px-2 py-3">Actions</th>
+      {% else %}
+      <th class="px-2 py-3">Status</th><th class="px-2 py-3">Verified</th>
+      {% endif %}
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      {% set p = row.p %}
+      <tr class="row">
+        <td class="px-4 py-2.5 font-medium">
+          <a href="/leads/{{ p.id }}">{{ p.name }}</a></td>
+        <td class="px-2 py-2.5 ink-2">{{ p.trade or '' }} · {{ (p.city or '') | title }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ p.email or p.phone or (p.contact_form_url and 'form') or '' }}</td>
+        {% if stage == 'in_sequence' %}
+        <td class="px-2 py-2.5"><span class="badge">{{ row.sequence }}</span></td>
+        <td class="px-2 py-2.5 ink-m text-xs">{{ row.next_at or 'reply pending / done' }}</td>
+        {% elif stage == 'replies' %}
+        <td class="px-2 py-2.5 ink-2" style="max-width:26rem">
+          {{ (row.latest_reply.raw_text[:120] if row.latest_reply else '') }}</td>
+        <td class="px-2 py-2.5">
+          {% if row.latest_reply %}<span class="badge">{{ row.latest_reply.classification }}</span>{% endif %}</td>
+        {% elif stage == 'closed' %}
+        <td class="px-2 py-2.5"><span class="badge">{{ row.reason }}</span></td>
+        {% elif stage == 'drafts' %}
+        <td class="px-2 py-2.5 ink-2">
+          {% if row.draft %}{{ row.draft.subject }}
+          <span class="badge ml-1">{{ row.draft.status }}</span>{% endif %}</td>
+        <td class="px-2 py-2.5">
+          {% if row.draft and row.draft.status == 'DRAFT' %}
+          <div class="flex gap-1.5">
+            <form method="post" action="/outbox/{{ row.draft.id }}/approve">
+              <button class="btn text-xs" style="background:#184f95;color:#fff">Approve</button></form>
+            <form method="post" action="/outbox/{{ row.draft.id }}/skip">
+              <button class="btn text-xs ink-2" style="background: var(--page)">Skip</button></form>
+            <a href="/outbox" class="btn text-xs ink-2" style="background: var(--page)">Edit</a>
+          </div>
+          {% endif %}</td>
+        {% else %}
+        <td class="px-2 py-2.5"><span class="badge">{{ p.status }}</span></td>
+        <td class="px-2 py-2.5"><span class="badge">{{ p.email_verification_level }}</span></td>
+        {% endif %}
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="px-4 py-8 text-center ink-m">Nothing in this stage.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="text-xs ink-m mt-2">{{ rows | length }} prospects · stage is derived live from touches and replies</div>
+{% endblock %}

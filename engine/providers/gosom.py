@@ -96,7 +96,12 @@ def parse_results_file(path: Path, source: str = "gosom") -> list[RawProspect]:
 class GosomProvider(ProspectProvider):
     name = "gosom"
 
-    def search(self, query: str, limit: int) -> list[RawProspect]:
+    def search(self, query: str, limit: int,
+               exclude_keys: set[str] | None = None,
+               progress=None) -> list[RawProspect]:
+        # exclude_keys/progress accepted for interface compatibility and ignored:
+        # this provider's dedupe key needs the scraped name+city, so exclusion
+        # cannot happen before the work. _is_duplicate() remains the backstop.
         settings = get_settings()
         binary = Path(settings.gosom_binary)
         if not binary.exists():

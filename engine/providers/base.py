@@ -1,8 +1,12 @@
-"""Provider interface so the prospect source can be swapped (gosom binary, CSV,
-or a paid API later) without touching the rest of the engine."""
+"""Provider interface so the prospect source can be swapped (registry, CSV,
+OSM, Places, ...) without touching the rest of the engine."""
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Awaitable, Callable
+
+# Optional sync progress hook a provider may call with human-readable lines.
+SyncProgress = Callable[[str], None]
 
 
 @dataclass
@@ -22,13 +26,40 @@ class RawProspect:
     owner_name: str = ""
     license_no: str = ""
 
+    @property
+    def dedupe_key(self) -> str:
+        """Cheap, stable identity computable BEFORE any network work.
+
+        Must match Prospect.dedupe_key so the exclusion set from the DB can be
+        applied to raw rows: license number when the source has one, else
+        name|city lowercased.
+        """
+        return make_dedupe_key(self.license_no, self.name, self.city)
+
+
+def make_dedupe_key(license_no: str | None, name: str | None, city: str | None) -> str:
+    if license_no and license_no.strip():
+        return license_no.strip().lower()
+    return f"{(name or '').strip()}|{(city or '').strip()}".lower()
+
 
 class ProspectProvider(ABC):
     name: str = "base"
 
     @abstractmethod
-    def search(self, query: str, limit: int) -> list[RawProspect]:
-        """Run a search like 'hvac contractor dallas tx' and return raw prospects."""
+    def search(self, query: str, limit: int,
+               exclude_keys: set[str] | None = None,
+               progress: SyncProgress | None = None) -> list[RawProspect]:
+        """Run a search like 'hvac contractor dallas tx' and return raw prospects.
+
+        exclude_keys: dedupe keys already in the database. Providers that can
+        compute a key cheaply (registry) MUST skip those candidates before any
+        expensive per-candidate work (website discovery). Others may ignore it —
+        the prospector's _is_duplicate() remains the correctness backstop.
+
+        progress: optional sync callback for human-readable progress lines
+        during long runs. Providers may ignore it.
+        """
 
 
 _STATE_RE = re.compile(r",\s*([A-Za-z .]+?),\s*([A-Z]{2})\b")

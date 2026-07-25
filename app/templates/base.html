@@ -65,8 +65,9 @@
             `<span class="badge" style="color:${c};border-color:${c}">${t}</span>`).join('');
         }).catch(() => {});
       </script>
-      {% for item in [('overview','/','Overview'),('leads','/leads','Leads'),
-                      ('outbox','/outbox','Outbox'),('activity','/activity','Activity'),
+      {% for item in [('overview','/','Overview'),('pipeline','/pipeline','Pipeline'),
+                      ('actions','/actions','Actions'),('outbox','/outbox','Outbox'),
+                      ('activity','/activity','Activity'),
                       ('settings','/settings','Settings'),('admin','/admin','Admin')] %}
       <a href="{{ item[1] }}" class="nav-link rounded-lg px-3 py-2 text-sm {% if active == item[0] %}active{% endif %}">
         {{ item[2] }}</a>

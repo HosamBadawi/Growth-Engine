@@ -124,16 +124,34 @@ database, with `.env` as the fallback.
 
 ## Prospect sources
 
-- **Registry (default)**  US state contractor license registries (public records,
-  bulk CSV, no scraping). Ships with Florida; adding a state is one entry in
-  `engine/providers/registry.py`.
-- **Google Maps**  wraps the MIT `gosom/google-maps-scraper` binary as a
-  subprocess. Download the release for your OS into `bin/` and set
-  `PROSPECT_PROVIDER=gosom`. Note: Google fingerprints headless automation, so this
-  is most reliable from a US residential/VPS egress; some networks see it fail with
-  `unexpected page type`.
-- **CSV import**  bring any list: `find "csv:path/to/leads.csv" "-" 50`, or import
-  from Admin → Data.
+| Provider | Coverage | Cost / keys | Data quality | Notes |
+|---|---|---|---|---|
+| `registry` (default) | US licensed trades (FL shipped) | free, none | owner + license no, no website (discovered) | public records, zero scraping risk |
+| `osm` | worldwide, any niche | free, none | name/address, phone+website when mapped | OpenStreetMap via Overpass |
+| `places` | worldwide, any niche | **paid**, `PLACES_API_KEY` | Google's business data incl. website + ratings | field-masked, hard daily cap |
+| `csv` | anything you import | free | whatever your file has | Admin → Data or `find "csv:..."` |
+| `gosom` | worldwide | free binary | Maps data | fingerprinted by Google; needs US egress; often fails elsewhere |
+
+- **Registry**: bulk CSV public records. Adding a state is one entry in
+  `engine/providers/registry.py`. Re-runs skip already-known businesses before
+  any website discovery, so `/find ... 10` always chases 10 *new* prospects.
+- **OSM (OpenStreetMap)**: keyless and worldwide — restaurants in Giza, cafes in
+  Alexandria, any tagged niche anywhere. Respects the public Overpass instance
+  usage policy (descriptive User-Agent, ≥2s between queries, backoff on 429/504,
+  7-day response cache). **Heavy users should self-host an Overpass instance**
+  rather than lean on the free public ones. Unknown niches fall back to a
+  name-substring match and say so in the log.
+- **Google Places**: the legitimate, ToS-compliant way to get Google's business
+  data. Costs real money per call: a free allowance exists, but pricing has been
+  restructured over time and sources conflict — **confirm the current figure in
+  your own Cloud Console before enabling**, which is exactly why the daily cap
+  (`PLACES_DAILY_CALL_CAP`, default 200) defaults low and the engine stops hard
+  at the cap instead of silently spending. Every call is logged with its SKU in
+  the Activity page.
+- **Google Maps (gosom)**: wraps the MIT `gosom/google-maps-scraper` binary as a
+  subprocess. Google fingerprints headless automation, so this is most reliable
+  from a US residential/VPS egress; some networks see it fail with
+  `unexpected page type`. Prefer `places` (paid, reliable) or `osm` (free).
 
 ## Safety rails (hard-coded, env can only tighten)
 
