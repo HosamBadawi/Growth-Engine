@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Prospector — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Admin · Prospector</h1>
+<div class="ink-m text-xs mb-4">Where new prospects come from and the code-level filters applied before anything enters the funnel.</div>
+{% include "_admin_nav.html" %}
+
+<form method="post" action="/admin/prospector/save" class="card p-4 max-w-2xl text-sm">
+  <div class="space-y-3">
+    <div class="flex justify-between items-center gap-2">
+      <label class="ink-2">Provider</label>
+      <select name="provider">
+        {% for p in providers %}
+        <option value="{{ p }}" {% if provider == p %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex justify-between items-center gap-2">
+      <label class="ink-2">Registry state (license registry provider)</label>
+      <input name="registry_state" value="{{ registry_state }}" class="w-20 text-sm" maxlength="2">
+    </div>
+    <div class="flex justify-between items-center gap-2">
+      <label class="ink-2">Min review count</label>
+      <input name="min_review_count" value="{{ min_reviews }}" class="w-24 text-sm">
+    </div>
+    <div class="flex justify-between items-center gap-2">
+      <label class="ink-2">Max review count</label>
+      <input name="max_review_count" value="{{ max_reviews }}" class="w-24 text-sm">
+    </div>
+    <div>
+      <label class="ink-2 block mb-1">Franchise blocklist (comma separated, name match skips the prospect)</label>
+      <textarea name="franchise_keywords" rows="3" class="w-full text-sm">{{ franchise_keywords }}</textarea>
+    </div>
+  </div>
+  <button class="btn mt-4" style="background:#184f95;color:#fff">Save</button>
+</form>
+{% endblock %}

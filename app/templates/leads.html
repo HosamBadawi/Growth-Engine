@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Leads — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-5">Leads</h1>
+
+<form method="get" class="flex flex-wrap gap-2 mb-4 text-sm">
+  <input name="q" value="{{ f.q }}" placeholder="Search name or email" class="w-48">
+  <select name="status">
+    <option value="">All statuses</option>
+    {% for s in statuses %}<option value="{{ s }}" {% if f.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <select name="trade">
+    <option value="">All trades</option>
+    {% for t in trades %}<option value="{{ t }}" {% if f.trade == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+  </select>
+  <select name="city">
+    <option value="">All cities</option>
+    {% for c in cities %}<option value="{{ c }}" {% if f.city == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+  </select>
+  <select name="verification">
+    <option value="">All verification</option>
+    {% for v in ['SMTP_OK','MX','SYNTAX','FAILED','NONE'] %}
+    <option value="{{ v }}" {% if f.verification == v %}selected{% endif %}>{{ v }}</option>{% endfor %}
+  </select>
+  <button class="btn" style="background: var(--surface-1)">Filter</button>
+  <a href="/leads" class="btn ink-2" style="background: var(--page)">Reset</a>
+</form>
+
+<div class="card overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="px-4 py-3">Name</th><th class="px-2 py-3">Trade</th>
+      <th class="px-2 py-3">City</th><th class="px-2 py-3">Email</th>
+      <th class="px-2 py-3">Verified</th><th class="px-2 py-3">Reviews</th>
+      <th class="px-2 py-3">Status</th><th class="px-2 py-3">Source</th>
+    </tr></thead>
+    <tbody>
+      {% for p in prospects %}
+      <tr class="row cursor-pointer" onclick="location='/leads/{{ p.id }}'">
+        <td class="px-4 py-2.5 font-medium">{{ p.name }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ p.trade or '' }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ (p.city or '') | title }}{% if p.state %}, {{ p.state }}{% endif %}</td>
+        <td class="px-2 py-2.5 ink-2">{{ p.email or (p.contact_form_url and 'form') or '' }}</td>
+        <td class="px-2 py-2.5"><span class="badge">{{ p.email_verification_level }}</span></td>
+        <td class="px-2 py-2.5 ink-2">{{ p.review_count or '' }}{% if p.rating %} ({{ p.rating }}){% endif %}</td>
+        <td class="px-2 py-2.5"><span class="badge">{{ p.status }}</span></td>
+        <td class="px-2 py-2.5 ink-m text-xs">{{ p.source }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="px-4 py-8 text-center ink-m">
+        No prospects yet. Run /find in Telegram or: python -m engine.cli find "plumber" "tampa fl" 15
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="text-xs ink-m mt-2">{{ prospects | length }} shown (max 500)</div>
+{% endblock %}

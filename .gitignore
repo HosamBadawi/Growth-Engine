@@ -1,0 +1,28 @@
+# Secrets & local state — never commit
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+.venv-verify/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+
+# Local data, logs, outputs
+data/
+logs/
+outbox/
+*.eml
+*.db
+*.sqlite3
+
+# Binaries (gosom etc.)
+bin/
+
+# Tooling / scratch
+.claude/
+scratch/

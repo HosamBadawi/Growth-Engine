@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Outbox — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-5">Outbox</h1>
+
+<div class="ink-m text-xs mb-2">Drafts awaiting approval ({{ drafts | length }})</div>
+{% for t in drafts %}
+<div class="card p-4 mb-3 text-sm">
+  <div class="flex items-center gap-2 mb-2">
+    <a href="/leads/{{ t.prospect_id }}" class="font-medium">{{ t.prospect.name }}</a>
+    <span class="ink-2">&lt;{{ t.prospect.email }}&gt;</span>
+    <span class="badge">{{ t.prospect.email_verification_level }}</span>
+    <span class="ink-m text-xs">draft #{{ t.id }}</span>
+  </div>
+  <details>
+    <summary class="cursor-pointer ink-2">Subject: {{ t.subject }}</summary>
+    <form method="post" action="/outbox/{{ t.id }}/edit" class="mt-2">
+      <input name="subject" value="{{ t.subject }}" class="w-full mb-2 text-sm">
+      <textarea name="body" rows="12" class="w-full text-sm font-mono">{{ t.body }}</textarea>
+      <button class="btn mt-2" style="background: var(--surface-1)">Save edit</button>
+    </form>
+  </details>
+  <div class="flex gap-2 mt-3">
+    <form method="post" action="/outbox/{{ t.id }}/approve">
+      <button class="btn" style="background:#184f95;color:#fff">Approve</button></form>
+    <form method="post" action="/outbox/{{ t.id }}/skip">
+      <button class="btn ink-2" style="background: var(--page)">Skip</button></form>
+  </div>
+</div>
+{% else %}<div class="card p-6 ink-m text-sm mb-4">No drafts pending. Run /draft in Telegram.</div>{% endfor %}
+
+<div class="ink-m text-xs mb-2 mt-6">Approved, waiting for /send ({{ approved | length }})</div>
+{% for t in approved %}
+<div class="card px-4 py-2.5 mb-2 text-sm flex items-center gap-3">
+  <span class="font-medium">{{ t.prospect.name }}</span>
+  <span class="ink-2">{{ t.subject }}</span>
+  <form method="post" action="/outbox/{{ t.id }}/skip" class="ml-auto">
+    <button class="btn ink-2 text-xs" style="background: var(--page)">Skip</button></form>
+</div>
+{% else %}<div class="ink-m text-sm mb-4">None.</div>{% endfor %}
+
+<div class="ink-m text-xs mb-2 mt-6">Scheduled queue ({{ queued | length }})</div>
+<div class="card overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="px-4 py-3">When (UTC)</th><th class="px-2 py-3">Type</th>
+      <th class="px-2 py-3">Prospect</th><th class="px-2 py-3">Subject</th>
+      <th class="px-2 py-3">Status</th>
+    </tr></thead>
+    <tbody>
+    {% for t in queued %}
+      <tr class="row">
+        <td class="px-4 py-2.5 ink-2">{{ t.scheduled_at }}</td>
+        <td class="px-2 py-2.5"><span class="badge">{{ t.type }}</span></td>
+        <td class="px-2 py-2.5">{{ t.prospect.name }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ t.subject }}</td>
+        <td class="px-2 py-2.5"><span class="badge">{{ t.status }}</span></td>
+      </tr>
+    {% else %}<tr><td colspan="5" class="px-4 py-6 text-center ink-m">Queue empty.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

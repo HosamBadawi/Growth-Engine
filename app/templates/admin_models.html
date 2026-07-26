@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Models — Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Admin · Models &amp; Providers</h1>
+<div class="ink-m text-xs mb-4">Local Ollama is free and the default. API providers are cost-guarded: {{ cap }} calls/day per provider, then automatic fallback to local.</div>
+{% include "_admin_nav.html" %}
+
+<div class="card p-4 mb-5">
+  <div class="text-sm font-medium mb-3">Role assignments</div>
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="py-2">Role</th><th class="py-2">Currently resolves to</th>
+      <th class="py-2">Assign</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for role, info in roles.items() %}
+      <tr class="row">
+        <td class="py-2.5 font-medium">{{ role }}</td>
+        <td class="py-2.5 ink-2">{{ info.model }} <span class="ink-m text-xs">via {{ info.provider }}</span>
+          {% if info.provider_type == 'ollama' and benchmarks.get(info.model) %}
+          <span class="badge ml-1">{{ benchmarks[info.model].tps }} tok/s</span>{% endif %}</td>
+        <td class="py-2.5">
+          <form method="post" action="/admin/models/roles" class="flex gap-1.5 items-center">
+            <input type="hidden" name="role" value="{{ role }}">
+            <select name="connection_id" class="text-xs">
+              <option value="">local Ollama (env)</option>
+              {% for row in conn_rows %}
+              <option value="{{ row.c.id }}"
+                {% if assignments.get(role) and assignments[role].llm_connection_id == row.c.id %}selected{% endif %}>
+                {{ row.c.name }}</option>
+              {% endfor %}
+            </select>
+            <input name="model_name" list="installed-models" class="text-xs w-44"
+                   placeholder="model (blank = env: {{ env_models[role] }})"
+                   value="{{ assignments[role].model_name if assignments.get(role) else '' }}">
+            <button class="btn text-xs" style="background:#184f95;color:#fff">Save</button>
+          </form>
+        </td>
+        <td class="py-2.5">
+          {% if assignments.get(role) %}
+          <form method="post" action="/admin/models/roles/{{ role }}/reset">
+            <button class="btn text-xs ink-2" style="background: var(--page)">Reset</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <datalist id="installed-models">
+    {% for m in installed %}<option value="{{ m }}">{% endfor %}
+    <option value="gpt-4o-mini"><option value="gpt-4o"><option value="claude-sonnet-5">
+    <option value="claude-haiku-4-5"><option value="llama-3.1-70b-versatile">
+  </datalist>
+  <div class="ink-m text-xs mt-2">Model field: pick an installed Ollama model from the list, or type any API model id free-text.</div>
+</div>
+
+<div class="card p-4 mb-5">
+  <div class="flex items-center justify-between mb-1">
+    <div class="text-sm font-medium">LLM provider connections</div>
+    <form method="post" action="/admin/models/benchmark">
+      <button class="btn text-xs" style="background: var(--surface-1)">Re-benchmark local models</button>
+    </form>
+  </div>
+  <div class="ink-m text-xs mb-3">openai_compat covers OpenAI, OpenRouter, Groq, DeepSeek, Together, LM Studio, and Ollama's own /v1. API keys are stored in the local DB and masked here.</div>
+
+  {% for row in conn_rows %}
+  <div class="flex items-center gap-3 text-sm py-2" style="border-top:1px solid var(--grid)">
+    <span class="font-medium">{{ row.c.name }}</span>
+    {% if not row.c.is_active %}<span class="badge">disabled</span>{% endif %}
+    <span class="ink-m text-xs">{{ row.detail }}</span>
+    <div class="ml-auto flex gap-1.5">
+      <form method="post" action="/admin/llm/{{ row.c.id }}/test">
+        <button class="btn text-xs" style="background: var(--surface-1)">Test</button></form>
+      <form method="post" action="/admin/llm/{{ row.c.id }}/delete"
+            onsubmit="return confirm('Delete this LLM connection? Roles using it reset to local.')">
+        <button class="btn text-xs" style="background: var(--page); color:#d03b3b">Delete</button></form>
+    </div>
+  </div>
+  {% else %}
+  <div class="ink-m text-sm py-2" style="border-top:1px solid var(--grid)">
+    None saved. The engine runs on local Ollama ({{ env_models.writer }}).</div>
+  {% endfor %}
+
+  <details class="mt-3">
+    <summary class="cursor-pointer text-sm ink-2">+ Add provider</summary>
+    <form method="post" action="/admin/llm/add" class="grid md:grid-cols-2 gap-2 mt-3 text-sm">
+      <input name="name" placeholder="Name (e.g. OpenRouter, Groq free tier)" required>
+      <select name="provider_type">
+        <option value="openai_compat">openai_compat (OpenAI/OpenRouter/Groq/LM Studio/...)</option>
+        <option value="anthropic">anthropic (Claude API)</option>
+        <option value="ollama">ollama (another Ollama server)</option>
+      </select>
+      <input name="base_url" placeholder="Base URL (blank = provider default)">
+      <input name="api_key" type="password" placeholder="API key (blank for local servers)">
+      <button class="btn md:col-span-2 justify-self-start" style="background: var(--surface-1)">Save</button>
+    </form>
+  </details>
+</div>
+
+<div class="card p-4">
+  <div class="text-sm font-medium mb-2">API usage today (cap {{ cap }} calls/provider)</div>
+  {% if usage %}
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs"><th class="py-1">Provider</th><th>Type</th>
+      <th>Calls</th><th>Tokens in</th><th>Tokens out</th></tr></thead>
+    <tbody>
+    {% for label, u in usage.items() %}
+      <tr class="row"><td class="py-1.5 font-medium">{{ label }}</td>
+        <td class="ink-2">{{ u.provider_type }}</td><td>{{ u.calls }}</td>
+        <td class="ink-2">{{ u.tokens_in }}</td><td class="ink-2">{{ u.tokens_out }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="ink-m text-sm">No LLM calls recorded today.</div>{% endif %}
+</div>
+{% endblock %}
