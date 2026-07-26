@@ -12,8 +12,23 @@ from engine.config import get_settings
 log = logging.getLogger("prospector.settings")
 
 STATE_KEY = "prospector_overrides"
-VALID_PROVIDERS = ("registry", "gosom", "csv")
 _cache: dict | None = None
+
+
+def valid_providers() -> tuple[str, ...]:
+    """Derived from the provider registry, never hand-maintained.
+
+    v2.1 shipped a hardcoded tuple that omitted 'osm' and 'places', so saving
+    either from the admin panel was silently discarded. Deriving it means adding
+    a provider can never again desync from what the UI offers or accepts.
+    """
+    from engine.providers import PROVIDERS
+
+    return tuple(PROVIDERS)
+
+
+# Backwards-compatible module attribute for any caller that imported the tuple.
+VALID_PROVIDERS = valid_providers()
 
 
 def invalidate() -> None:
@@ -35,7 +50,7 @@ def get_overrides() -> dict:
         finally:
             session.close()
         _cache = json.loads(raw) if raw else {}
-    except Exception as exc:  # noqa: BLE001 — no DB yet: behave as env-only
+    except Exception as exc:  # noqa: BLE001 (no DB yet: behave as env-only)
         log.debug("prospector overrides unavailable: %s", exc)
         _cache = {}
     return _cache
@@ -45,8 +60,14 @@ def save_overrides(session, data: dict) -> dict:
     from engine.state import set_state
 
     clean: dict = {}
-    if data.get("provider") in VALID_PROVIDERS:
-        clean["provider"] = data["provider"]
+    if "provider" in data and data["provider"] not in (None, ""):
+        if data["provider"] in valid_providers():
+            clean["provider"] = data["provider"]
+        else:  # never drop a rejected value in silence
+            log.warning("Rejected provider %r: not one of %s",
+                        data["provider"], list(valid_providers()))
+    if "require_website" in data:
+        clean["require_website"] = bool(data["require_website"])
     if data.get("registry_state"):
         clean["registry_state"] = str(data["registry_state"]).strip().upper()[:2]
     for key in ("min_review_count", "max_review_count"):
@@ -66,6 +87,16 @@ def save_overrides(session, data: dict) -> dict:
 
 def eff_provider() -> str:
     return get_overrides().get("provider", get_settings().prospect_provider)
+
+
+def eff_require_website() -> bool:
+    """True (default) = drop prospects with no website, as a cold-email campaign
+    needs. False = keep them; they become the Phase 4 'no website' segment and
+    are never auto-emailed unless a verified address turns up."""
+    ov = get_overrides()
+    if "require_website" in ov:
+        return bool(ov["require_website"])
+    return get_settings().require_website
 
 
 def eff_registry_state() -> str:

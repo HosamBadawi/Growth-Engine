@@ -8,7 +8,11 @@ from db.session import get_engine
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False is REQUIRED, not cosmetic. Migrations run at
+    # startup, after the engine's modules are imported, and fileConfig's default
+    # (True) silently sets .disabled on every logger that already exists, so the
+    # engine would run the rest of its life with no log output from those modules.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

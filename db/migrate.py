@@ -46,10 +46,10 @@ def run_migrations() -> None:
     # No alembic_version yet.
     if tables - {"alembic_version"}:
         # Pre-Alembic database with real data: add any missing tables, adopt at
-        # the BASELINE, then upgrade — so later revisions (and their data
+        # the BASELINE, then upgrade, so later revisions (and their data
         # backfills) still run instead of being stamped over.
         log.info("Adopting existing database under Alembic (baseline, then upgrade)")
-        init_db()  # create_all — additive only, never drops
+        init_db()  # create_all: additive only, never drops
         command.stamp(cfg, "0001_baseline")
         command.upgrade(cfg, "head")
     else:

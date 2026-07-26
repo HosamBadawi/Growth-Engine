@@ -27,7 +27,7 @@ def start_job(title: str,
             result = await factory(progress)
             if result is not None:
                 _jobs[job_id]["lines"].append(f"Result: {result}")
-        except Exception as exc:  # noqa: BLE001 — surfaced to the page, never raised
+        except Exception as exc:  # noqa: BLE001 (surfaced to the page, never raised)
             _jobs[job_id]["error"] = str(exc)[:300]
         finally:
             _jobs[job_id]["done"] = True

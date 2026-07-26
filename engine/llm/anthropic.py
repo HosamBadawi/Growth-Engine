@@ -1,4 +1,4 @@
-"""Anthropic provider — POST /v1/messages. max_tokens is REQUIRED by that API;
+"""Anthropic provider: POST /v1/messages. max_tokens is REQUIRED by that API;
 system is a top-level field, not a message; JSON via prompt-and-validate (the
 base class handles retries). Model listing uses GET /v1/models.
 """

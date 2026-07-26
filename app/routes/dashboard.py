@@ -29,7 +29,7 @@ def _campaign_placeholder() -> bool:
 
     try:
         return get_campaign().is_placeholder
-    except Exception:  # noqa: BLE001 — banner must never break a page render
+    except Exception:  # noqa: BLE001 (banner must never break a page render)
         return False
 
 

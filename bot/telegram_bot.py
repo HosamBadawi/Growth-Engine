@@ -68,6 +68,9 @@ async def cmd_help(message: Message) -> None:
         f"Growth Engine [{settings.engine_mode.upper()}]\n\n"
         "/find <niche> <city> <n>  find + enrich + verify\n"
         "/draft  write drafts for all verified prospects\n"
+        "/enrich [filter] [n]  re-run discovery over existing prospects\n"
+        "    filters: no_website (default), no_email, never_enriched,\n"
+        "    no_contact, unreachable\n"
         "/send  queue approved drafts (caps + window apply)\n"
         "/status  funnel summary\n"
         "/models  LLM role assignments + API usage\n"
@@ -111,6 +114,57 @@ async def cmd_find(message: Message, command: CommandObject) -> None:
         except Exception as exc:  # noqa: BLE001
             log.exception("/find failed")
             await message.answer(f"Pipeline failed: {exc}")
+
+    asyncio.create_task(job())
+
+
+@router.message(Command("enrich"))
+async def cmd_enrich(message: Message, command: CommandObject) -> None:
+    """Point the discovery ladder at prospects you already have."""
+    import asyncio
+
+    from engine.backfill import FILTERS, run_backfill
+
+    args = (command.args or "").split()
+    filter_key = args[0] if args and args[0] in FILTERS else "no_website"
+    try:
+        limit = int(args[-1]) if args and args[-1].isdigit() else 25
+    except ValueError:
+        limit = 25
+    limit = max(1, min(limit, 200))
+
+    if args and args[0] not in FILTERS and not args[0].isdigit():
+        await message.answer(
+            f"Unknown filter '{args[0]}'. Options:\n"
+            + "\n".join(f"  {k}: {v}" for k, v in FILTERS.items()))
+        return
+
+    await message.answer(f"Re-running discovery: {FILTERS[filter_key]}, "
+                         f"up to {limit} prospects. This is paced, so it takes "
+                         f"a while; progress follows.")
+
+    async def job() -> None:
+        session = new_session()
+        try:
+            lines: list[str] = []
+
+            def progress(text: str) -> None:
+                lines.append(text)
+
+            summary = await asyncio.to_thread(run_backfill, session, filter_key,
+                                              limit, progress)
+            tail = "\n".join(lines[-12:])
+            await message.answer(
+                f"Backfill done: processed {summary['processed']}, "
+                f"websites +{summary['websites_found']}, "
+                f"emails +{summary['emails_found']}, "
+                f"socials +{summary['socials_found']}, "
+                f"failed {summary['failed']}\n\n{tail}"[:4000])
+        except Exception as exc:  # noqa: BLE001
+            log.exception("/enrich failed")
+            await message.answer(f"Backfill failed: {exc}")
+        finally:
+            session.close()
 
     asyncio.create_task(job())
 

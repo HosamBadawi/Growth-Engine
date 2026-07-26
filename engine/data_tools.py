@@ -14,10 +14,11 @@ from engine.sender import OUTBOX_DIR
 
 log = logging.getLogger("data_tools")
 
-PROSPECT_COLUMNS = ["id", "name", "trade", "city", "state", "phone", "website",
-                    "email", "email_verification_level", "owner_name", "status",
-                    "rating", "review_count", "source", "contact_form_url",
-                    "created_at"]
+PROSPECT_COLUMNS = ["id", "name", "trade", "city", "state", "country", "phone",
+                    "website", "email", "email_verification_level", "owner_name",
+                    "status", "rating", "review_count", "source",
+                    "contact_form_url", "social_links", "provenance",
+                    "discovery_partial", "created_at"]
 TOUCH_COLUMNS = ["id", "prospect_id", "type", "status", "subject",
                  "scheduled_at", "sent_at", "created_at"]
 REPLY_COLUMNS = ["id", "prospect_id", "classification", "received_at",
@@ -30,14 +31,92 @@ EXPORTS = {
 }
 
 
-def export_csv(session: Session, table: str) -> str:
-    """Render one table as CSV text."""
-    model, columns = EXPORTS[table]
+def _cell(value) -> str:
+    """Render a value for CSV: dicts/lists as compact JSON, never 'None'."""
+    import json
+
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)
+
+
+def rows_to_csv(rows, columns: list[str], extra=None) -> str:
+    """CSV text for any row set. `extra` maps a column name to a callable.
+
+    Written by callers as utf-8-sig (BOM) so Excel renders Portuguese and
+    Arabic business names instead of mojibake.
+    """
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(columns)
-    for row in session.execute(select(model).order_by(model.id)).scalars():
-        writer.writerow([getattr(row, col, "") for col in columns])
+    extra = extra or {}
+    for row in rows:
+        writer.writerow([
+            _cell(extra[col](row)) if col in extra else _cell(getattr(row, col, ""))
+            for col in columns
+        ])
+    return buffer.getvalue()
+
+
+def export_csv(session: Session, table: str) -> str:
+    """Render one whole table as CSV text."""
+    model, columns = EXPORTS[table]
+    rows = session.execute(select(model).order_by(model.id)).scalars()
+    return rows_to_csv(rows, columns)
+
+
+VIEW_COLUMNS = PROSPECT_COLUMNS + ["stage", "channel"]
+
+
+def export_prospect_view(prospects: list) -> str:
+    """Export exactly the rows the operator is looking at, in their order."""
+    from engine.enricher import outreach_channel
+    from engine.stages import derive_stage
+
+    return rows_to_csv(prospects, VIEW_COLUMNS,
+                       extra={"stage": derive_stage, "channel": outreach_channel})
+
+
+RUN_COLUMNS = ["outcome", "name", "city", "country", "reason", "phone",
+               "website", "emails", "source", "dedupe_key"]
+
+
+def export_run_csv(session: Session, run_id: int) -> str:
+    """Everything a run touched, INCLUDING the rows it threw away.
+
+    A filtered candidate is real data. v2.1 showed the operator the number '10'
+    next to the word 'filtered' and discarded the rows; one of them was a lead
+    a human found contactable in under a minute.
+    """
+    from db.models import FindRun, RejectedCandidate
+
+    run = session.get(FindRun, run_id)
+    ids = ((run.summary_json or {}).get("prospect_ids") or []) if run else []
+    kept = session.execute(
+        select(Prospect).where(Prospect.id.in_(ids)).order_by(Prospect.id)
+    ).scalars().all() if ids else []
+    rejected = session.execute(
+        select(RejectedCandidate).where(RejectedCandidate.run_id == run_id)
+        .order_by(RejectedCandidate.id)
+    ).scalars().all()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(RUN_COLUMNS)
+    for p in kept:
+        writer.writerow([_cell(v) for v in ["kept", p.name, p.city, p.country, "",
+                                            p.phone, p.website, p.email or "",
+                                            p.source, p.dedupe_key]])
+    for r in rejected:
+        raw = r.raw_json or {}
+        writer.writerow([_cell(v) for v in ["rejected", r.name, r.city, r.country,
+                                            r.reason, raw.get("phone", ""),
+                                            raw.get("website", ""),
+                                            raw.get("emails", ""),
+                                            raw.get("source", ""),
+                                            raw.get("dedupe_key", "")]])
     return buffer.getvalue()
 
 

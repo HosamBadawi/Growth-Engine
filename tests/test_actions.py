@@ -1,4 +1,4 @@
-"""Phase 4: web parity actions — auth, job runner, pause/resume, LIVE stays dual-key."""
+"""Phase 4 web parity actions: auth, job runner, pause/resume, LIVE stays dual-key."""
 import pytest
 from fastapi.testclient import TestClient
 
@@ -75,8 +75,11 @@ def test_pause_and_resume_roundtrip(authed, session):
 
 
 def test_queue_approved_from_web(authed, session):
+    from db.models import VerificationLevel
+
     p = Prospect(name="Approved Co", status=ProspectStatus.VERIFIED, city="tampa",
-                 email="a@b.example")
+                 email="a@b.example",
+                 email_verification_level=VerificationLevel.MX)
     session.add(p)
     session.commit()
     touch = Touch(prospect_id=p.id, type="EMAIL_1", subject="s", body="b",
@@ -87,6 +90,28 @@ def test_queue_approved_from_web(authed, session):
     authed.post("/actions/queue", follow_redirects=False)
     session.refresh(touch)
     assert touch.status == TouchStatus.QUEUED
+
+
+def test_unverified_prospect_is_refused_at_queue_time(authed, session):
+    """Safety property, not a UI hint: an unverified address never enters a
+    sequence, even if a draft for it was approved."""
+    from db.models import VerificationLevel
+
+    p = Prospect(name="No Website Co", status=ProspectStatus.DRAFTED, city="rio",
+                 email="maybe@unverified.example",
+                 email_verification_level=VerificationLevel.NONE,
+                 social_links={"instagram": "https://www.instagram.com/x"})
+    session.add(p)
+    session.commit()
+    touch = Touch(prospect_id=p.id, type="EMAIL_1", subject="s", body="b",
+                  status=TouchStatus.APPROVED)
+    session.add(touch)
+    session.commit()
+
+    authed.post("/actions/queue", follow_redirects=False)
+    session.refresh(touch)
+    assert touch.status == TouchStatus.CANCELLED
+    assert touch.meta_json["cancel_reason"] == "email not verified"
 
 
 def test_golive_request_refuses_unless_env_is_live(authed, session):

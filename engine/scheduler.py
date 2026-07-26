@@ -36,7 +36,7 @@ def _on_job_error(event) -> None:
                       f"Job '{event.job_id}' failed: {exc}", level="ERROR")
         finally:
             session.close()
-    except Exception:  # noqa: BLE001 — logging must never crash the listener
+    except Exception:  # noqa: BLE001 (logging must never crash the listener)
         pass
     try:
         from bot.notify import notify

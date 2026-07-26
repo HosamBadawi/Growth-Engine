@@ -1,4 +1,4 @@
-"""Ollama provider — wraps the native /api/chat + /api/tags endpoints.
+"""Ollama provider: wraps the native /api/chat + /api/tags endpoints.
 
 Absorbs the v1 ollama_client logic (benchmark + startup_check stay available via
 engine.ollama_client, which now delegates here) so nothing local regressed.

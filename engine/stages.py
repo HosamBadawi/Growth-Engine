@@ -84,8 +84,55 @@ def stage_counts(session: Session) -> dict[str, int]:
     return counts
 
 
-def prospects_for_stage(session: Session, stage: str) -> list[Prospect]:
+# Phase 4 segments. Like stages, these are DERIVED: a stored flag would drift
+# the moment discovery found a site or the verifier changed a level.
+SEGMENT_ALL = ""
+SEGMENT_NO_WEBSITE = "no_website"
+SEGMENT_EMAILABLE = "emailable"
+SEGMENT_MANUAL = "manual"
+
+SEGMENT_LABELS = {
+    SEGMENT_ALL: "All",
+    SEGMENT_NO_WEBSITE: "No website",
+    SEGMENT_EMAILABLE: "Emailable",
+    SEGMENT_MANUAL: "Manual only",
+}
+
+
+def in_segment(prospect: Prospect, segment: str) -> bool:
+    """Segment membership, computed from the prospect's current facts.
+
+    'emailable' means the engine may contact them automatically: a verified
+    address. 'manual' means a human has to do it: form, phone or a social
+    handle. Those two are deliberately disjoint, because the difference is
+    exactly what the sender will and will not do on its own.
+    """
+    from db.models import VerificationLevel
+    from engine.enricher import outreach_channel
+
+    if not segment:
+        return True
+    if segment == SEGMENT_NO_WEBSITE:
+        return not prospect.website
+    emailable = bool(prospect.email) and prospect.email_verification_level not in (
+        VerificationLevel.NONE, VerificationLevel.FAILED)
+    if segment == SEGMENT_EMAILABLE:
+        return emailable
+    if segment == SEGMENT_MANUAL:
+        return not emailable and outreach_channel(prospect) != "none"
+    return True
+
+
+def segment_counts(session: Session, stage: str) -> dict[str, int]:
     rows = [p for p in _all_with_relations(session) if derive_stage(p) == stage]
+    return {seg: sum(1 for p in rows if in_segment(p, seg))
+            for seg in SEGMENT_LABELS}
+
+
+def prospects_for_stage(session: Session, stage: str,
+                        segment: str = SEGMENT_ALL) -> list[Prospect]:
+    rows = [p for p in _all_with_relations(session)
+            if derive_stage(p) == stage and in_segment(p, segment)]
     if stage == STAGE_REPLIES:
         # money page: newest inbound reply first
         rows.sort(key=lambda p: max((r.received_at for r in p.replies),

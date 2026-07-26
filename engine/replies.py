@@ -1,4 +1,4 @@
-"""Module 7 — Reply Watcher: IMAP poll -> classify -> Telegram alert with
+"""Module 7, Reply Watcher: IMAP poll -> classify -> Telegram alert with
 suggested reply. STOP/unsubscribe -> suppression forever. Bounce -> form path.
 """
 import asyncio
@@ -231,7 +231,7 @@ async def process_inbox() -> None:
 
     try:
         messages = await asyncio.to_thread(fetch_unseen)
-    except Exception as exc:  # noqa: BLE001 — IMAP hiccups must not kill the loop
+    except Exception as exc:  # noqa: BLE001 (IMAP hiccups must not kill the loop)
         log.warning("IMAP poll failed: %s", exc)
         return
     if not messages:
@@ -264,7 +264,7 @@ async def process_inbox() -> None:
     if handled_uids:
         try:
             await asyncio.to_thread(mark_seen, handled_uids)
-        except Exception as exc:  # noqa: BLE001 — worst case: reprocess next poll
+        except Exception as exc:  # noqa: BLE001 (worst case: reprocess next poll)
             log.warning("mark_seen failed (messages will be reprocessed): %s", exc)
 
 

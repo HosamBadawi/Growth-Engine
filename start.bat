@@ -1,5 +1,5 @@
 @echo off
-REM Growth Engine — double-click launcher (Windows).
+REM Growth Engine: double-click launcher (Windows).
 REM Creates the virtual environment and installs packages on first run,
 REM then starts the engine with the RIGHT Python every time.
 setlocal

@@ -54,7 +54,7 @@ def test_incremental_flush_survives_interrupt(registry_tmp, monkeypatch):
 
     calls = {"n": 0}
 
-    def guess(client, name):
+    def guess(client, name, country=None):
         calls["n"] += 1
         if calls["n"] == 4:
             raise KeyboardInterrupt  # simulate Ctrl-C mid-run
@@ -78,7 +78,7 @@ def test_progress_callback_emits(registry_tmp, monkeypatch):
             for i in range(12)]
     monkeypatch.setattr(reg, "_iter_rows_for_trade", _fake_iter(rows))
     # every candidate is a miss so all 12 are "checked"
-    monkeypatch.setattr(reg, "guess_domain", lambda c, n: "")
+    monkeypatch.setattr(reg, "guess_domain", lambda c, n, country=None: "")
     monkeypatch.setattr(reg, "search_website", lambda *a, **k: "")
     monkeypatch.setattr(reg.time, "sleep", lambda s: None)
 

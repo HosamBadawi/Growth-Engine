@@ -62,7 +62,7 @@ async def nightly_backup() -> None:
 
     try:
         path = await asyncio.to_thread(run_backup)
-    except Exception as exc:  # noqa: BLE001 — a backup failure must not kill the loop
+    except Exception as exc:  # noqa: BLE001 (a backup failure must not kill the loop)
         log.warning("backup failed: %s", exc)
         session = new_session()
         try:

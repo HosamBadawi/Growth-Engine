@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Actions — Growth Engine{% endblock %}
+{% block title %}Actions · Growth Engine{% endblock %}
 {% block content %}
 <h1 class="text-lg font-semibold mb-1">Actions</h1>
 <div class="ink-m text-xs mb-4">Everything the Telegram bot can do, from the browser. Mode is <b>{{ mode }}</b> and is set in .env only.</div>
@@ -19,10 +19,25 @@
         {% for p, unavailable in providers.items() %}
         <option value="{{ p }}" {% if p == default_provider %}selected{% endif %}
                 {% if unavailable %}disabled{% endif %}>
-          {{ p }}{% if unavailable %} — {{ unavailable }}{% endif %}</option>
+          {{ p }}{% if unavailable %} ({{ unavailable }}){% endif %}</option>
         {% endfor %}
       </select>
       <button class="btn col-span-2 justify-self-start" style="background:#184f95;color:#fff">Start find run</button>
+    </form>
+  </div>
+
+  <div class="card p-4">
+    <div class="text-sm font-medium mb-1">1b · Re-run discovery (backfill)</div>
+    <div class="ink-m text-xs mb-3">Point the contact ladder at prospects you
+      already have. Never overwrites a higher-confidence value with a guess.</div>
+    <form method="post" action="/actions/enrich" class="flex flex-wrap gap-2 items-center">
+      <select name="filter_key" class="text-sm">
+        {% for key, label in backfill_filters.items() %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+      <input name="count" value="25" class="w-20 text-sm" title="How many prospects">
+      <button class="btn" style="background:#184f95;color:#fff">Re-run discovery</button>
     </form>
   </div>
 
@@ -86,7 +101,7 @@ if (jobId) {
     el.textContent = (j.lines || []).join('\n') || 'starting...';
     if (j.error) el.textContent += '\nERROR: ' + j.error;
     if (!j.done) setTimeout(poll, 2000);
-    else el.textContent += '\n— finished —';
+    else el.textContent += '\n(finished)';
   }).catch(() => {});
   poll();
 }

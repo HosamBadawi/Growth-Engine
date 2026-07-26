@@ -1,4 +1,4 @@
-"""Researcher v2 — real web deep-research per prospect.
+"""Researcher v2: real web deep-research per prospect.
 
 WebResearcher runs 2-4 targeted searches (ddgs multi-engine, or a self-hosted
 SearXNG when SEARXNG_BASE_URL is set), skips ad/sponsored results, fetches the
@@ -7,7 +7,7 @@ timeout, ~6k chars total), and distills through the LLM researcher role into
 the same card schema as v1, plus source_urls.
 
 Research note (per repo rule 6): gpt-researcher (Apache-2.0) was evaluated and
-deliberately NOT integrated — it pulls a heavy dependency tree and an agent
+deliberately NOT integrated: it pulls a heavy dependency tree and an agent
 loop designed for long-form reports, while this pipeline needs one small JSON
 card per prospect. ddgs + httpx + bs4 (all existing deps) cover it.
 """
@@ -104,7 +104,7 @@ def search_links(prospect: Prospect, max_links: int = 6) -> list[str]:
                 href = result.get("href", "")
                 if _is_organic(href) and href not in links:
                     links.append(href)
-        except Exception as exc:  # noqa: BLE001 — one engine failing is routine
+        except Exception as exc:  # noqa: BLE001 (one engine failing is routine)
             log.debug("search failed (%s via %s): %s", query, backend, exc)
         time.sleep(SEARCH_DELAY_SECONDS)
         if len(links) >= max_links:

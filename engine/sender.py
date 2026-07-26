@@ -1,4 +1,4 @@
-"""Module 6 — Sender. Deliverability is sacred.
+"""Sender (module 6). Deliverability is sacred.
 
 Hard rails (code constants, env can only tighten them):
 - Warm-up ramp: day 1-7 max 10/day, 8-14 max 20/day, then 30/day.
@@ -124,6 +124,11 @@ def skip_reason(session: Session, prospect: Prospect) -> str | None:
         return "suppressed"
     if prospect.email_verification_level == VerificationLevel.FAILED:
         return "email failed verification"
+    if prospect.email_verification_level == VerificationLevel.NONE:
+        # v2.2: with require_website=False the database now holds prospects whose
+        # only channel is social or phone. An unverified address must never be
+        # emailed automatically: this is the safety property, not a UI hint.
+        return "email not verified"
     if prospect.status == ProspectStatus.SUPPRESSED:
         return "prospect suppressed"
     return None
@@ -218,15 +223,28 @@ def queue_approved(session: Session) -> int:
         select(Touch).where(Touch.status == TouchStatus.APPROVED)
     ).scalars().all()
     now = utcnow()
+    queued = 0
+    blocked: dict[str, int] = {}
     for touch in touches:
+        # Refuse at QUEUE time too, not only at send time: a no-website /
+        # unverified prospect must never enter an automated sequence at all.
+        reason = skip_reason(session, touch.prospect)
+        if reason:
+            touch.status = TouchStatus.CANCELLED
+            touch.meta_json = {**(touch.meta_json or {}), "cancel_reason": reason}
+            blocked[reason] = blocked.get(reason, 0) + 1
+            continue
         touch.status = TouchStatus.QUEUED
         touch.scheduled_at = touch.scheduled_at or now
         if touch.prospect.status in (ProspectStatus.DRAFTED, ProspectStatus.VERIFIED):
             touch.prospect.status = ProspectStatus.QUEUED
+        queued += 1
     session.commit()
     if touches:
-        log_event(session, "sender", f"Queued {len(touches)} approved drafts for sending")
-    return len(touches)
+        log_event(session, "sender",
+                  f"Queued {queued} approved drafts for sending"
+                  + (f"; refused {sum(blocked.values())} ({blocked})" if blocked else ""))
+    return queued
 
 
 # ── bounce circuit breaker ───────────────────────────────────────────────────
@@ -375,7 +393,7 @@ async def send_touch(session: Session, touch: Touch) -> tuple[bool, str]:
             use_tls=(email_cfg.smtp_port == 465),
             timeout=30,
         )
-    except Exception as exc:  # noqa: BLE001 — classify, then FAILED or BOUNCED
+    except Exception as exc:  # noqa: BLE001 (classify, then FAILED or BOUNCED)
         code = _smtp_error_code(exc)
         touch.meta_json = {**(touch.meta_json or {}), "error": str(exc)[:500],
                            **({"smtp_code": code} if code else {})}

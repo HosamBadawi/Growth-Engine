@@ -1,4 +1,4 @@
-"""Module 9 — Dashboard: FastAPI + Jinja2 + Tailwind (CDN) + Chart.js (CDN)."""
+"""Module 9 Dashboard: FastAPI + Jinja2 + Tailwind (CDN) + Chart.js (CDN)."""
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -59,7 +59,7 @@ async def healthz() -> dict:
         health["imap"] = "configured" if email_cfg.imap_host else "not configured"
         health["bot"] = ("configured" if resolve_telegram(session).token
                          else "not configured")
-    except Exception as exc:  # noqa: BLE001 — health must report, not raise
+    except Exception as exc:  # noqa: BLE001 (health must report, not raise)
         health["db"] = f"error: {str(exc)[:200]}"
     finally:
         session.close()

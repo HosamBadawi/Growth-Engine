@@ -1,4 +1,4 @@
-"""Module 8 — Reporter: daily Telegram summary + shared stats for the dashboard."""
+"""Reporter (module 8): daily Telegram summary + shared stats for the dashboard."""
 import logging
 from datetime import timedelta
 

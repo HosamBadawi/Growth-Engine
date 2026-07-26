@@ -1,4 +1,4 @@
-"""Editable sending rails — the admin panel can only TIGHTEN them.
+"""Editable sending rails: the admin panel can only TIGHTEN them.
 
 Overrides live in EngineState (key 'rail_overrides', JSON). Effective values are
 override-or-env, then clamped to the hard code constants so a DB value can never
@@ -43,7 +43,7 @@ def get_overrides() -> dict:
         finally:
             session.close()
         _cache = json.loads(raw) if raw else {}
-    except Exception as exc:  # noqa: BLE001 — no DB yet / bad JSON: behave as env-only
+    except Exception as exc:  # noqa: BLE001 (no DB yet / bad JSON: behave as env-only)
         log.debug("rail overrides unavailable, using env defaults: %s", exc)
         _cache = {}
     return _cache

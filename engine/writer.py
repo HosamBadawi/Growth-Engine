@@ -1,4 +1,4 @@
-"""Module 5 — Writer: personalized cold emails via Ollama.
+"""Module 5, Writer: personalized cold emails via Ollama.
 
 Strict JSON output {subject, body}, style rules enforced in code with retry
 feedback; deterministic Jinja2 template fallback if the model cannot comply.
@@ -84,10 +84,23 @@ def sanitize_detail(text: str) -> str:
     return text
 
 
-def template_context(prospect: Prospect, card: dict | None = None) -> dict:
-    from engine.campaign import get_campaign
+def campaign_for(prospect: Prospect):
+    """The offer that fits this prospect.
 
-    campaign = get_campaign()
+    A business with no website is not a missed-call prospect, it is a
+    website-build prospect. If the operator has configured a campaign for the
+    'no_website' segment it is used here; otherwise the default campaign is,
+    so single-offer setups behave exactly as before.
+    """
+    from engine.campaign import campaign_for_segment
+    from engine.stages import SEGMENT_NO_WEBSITE, in_segment
+
+    segment = SEGMENT_NO_WEBSITE if in_segment(prospect, SEGMENT_NO_WEBSITE) else ""
+    return campaign_for_segment(segment)
+
+
+def template_context(prospect: Prospect, card: dict | None = None) -> dict:
+    campaign = campaign_for(prospect)
     first_name = prospect.owner_name.split()[0] if prospect.owner_name else "there"
     job_value = campaign.job_value_for(prospect.trade)
     weekly_loss = campaign.missed_calls_per_week * job_value
@@ -129,8 +142,18 @@ def template_context(prospect: Prospect, card: dict | None = None) -> dict:
 def render_email_template(
     template_name: str, prospect: Prospect, card: dict | None = None
 ) -> tuple[str, str]:
-    """Render a sequence template; first line 'SUBJECT: ...' becomes the subject."""
-    text = _env.get_template(template_name).render(**template_context(prospect, card)).strip()
+    """Render a sequence template; first line 'SUBJECT: ...' becomes the subject.
+
+    A campaign may set template_dir to keep its own copies under
+    data/templates/<dir>/, so two offers never overwrite each other's wording.
+    """
+    campaign = campaign_for(prospect)
+    name = template_name
+    if campaign.template_dir:
+        scoped = f"{campaign.template_dir.strip('/')}/{template_name}"
+        if (OVERRIDE_DIR / scoped).exists():
+            name = scoped
+    text = _env.get_template(name).render(**template_context(prospect, card)).strip()
     first, _, rest = text.partition("\n")
     if first.upper().startswith("SUBJECT:"):
         return first.split(":", 1)[1].strip(), rest.strip()
@@ -176,10 +199,8 @@ def check_style(subject: str, body: str, prospect: Prospect,
     link ONLY (a calendar link from a stranger raises spam score, and email 1's
     only job is the reply); follow-ups may carry the calendar link.
     """
-    from engine.campaign import get_campaign
-
     settings = get_settings()
-    campaign = get_campaign()
+    campaign = campaign_for(prospect)
     violations = []
     words = len(body.split())
     if words > 150:
@@ -217,11 +238,11 @@ def check_style(subject: str, body: str, prospect: Prospect,
     return violations
 
 
-def writer_system_prompt() -> str:
-    """Brand-free system prompt rendered from the active campaign profile."""
+def writer_system_prompt(prospect: Prospect | None = None) -> str:
+    """Brand-free system prompt rendered from the campaign that fits the prospect."""
     from engine.campaign import get_campaign
 
-    campaign = get_campaign()
+    campaign = campaign_for(prospect) if prospect is not None else get_campaign()
     return f"""You write short cold emails for {campaign.sender_name}, \
 {campaign.sender_role} of {campaign.company}.
 {campaign.company} sells {campaign.product_pitch} to {campaign.target_niche}.
@@ -265,7 +286,7 @@ async def generate_draft(session: Session, prospect: Prospect) -> Touch:
     )
 
     subject, body, source = tpl_subject, tpl_body, "template"
-    system_prompt = writer_system_prompt()
+    system_prompt = writer_system_prompt(prospect)
     user = base_user
     try:
         for attempt in range(1, 4):

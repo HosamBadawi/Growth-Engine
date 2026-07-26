@@ -1,4 +1,4 @@
-"""Growth Engine — single entry point.
+"""Growth Engine: single entry point.
 
 Starts: dashboard (localhost:8080) + APScheduler (sender/replies/report) +
 Telegram bot (if token configured). DRY_RUN is the default mode.
@@ -9,7 +9,7 @@ import sys
 
 try:
     import uvicorn
-    import aiogram  # noqa: F401 — dependency check only
+    import aiogram  # noqa: F401 (dependency check only)
 except ModuleNotFoundError as exc:
     print(f"Missing dependency: {exc.name}. You are running Python from:\n"
           f"  {sys.executable}\n"
@@ -88,7 +88,7 @@ async def startup_checks() -> None:
                         print(f"  WARNING: LLM role '{role}' -> provider "
                               f"'{provider.label}' not usable ({detail}); "
                               f"calls will fall back to local Ollama")
-            except Exception as exc:  # noqa: BLE001 — startup must warn, never crash
+            except Exception as exc:  # noqa: BLE001 (startup must warn, never crash)
                 print(f"  WARNING: LLM role '{role}' check failed: {exc}")
     finally:
         session.close()

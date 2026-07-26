@@ -95,6 +95,14 @@ def test_backup_skips_non_sqlite(monkeypatch):
 
 
 def test_version_is_single_source():
+    """One source of truth, surfaced in /healthz and the dashboard footer, and
+    documented in the CHANGELOG. Asserting the shape rather than a literal keeps
+    this from needing an edit every release."""
+    import pathlib
+    import re
+
     from engine import __version__
 
-    assert __version__ == "2.1.0"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__), __version__
+    changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## {__version__}" in changelog, "current version missing from CHANGELOG"

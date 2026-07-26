@@ -1,8 +1,8 @@
 """LLMProvider ABC. The JSON-retry discipline that v1 proved out lives here so
 every provider (local or API) inherits identical validation and retry behavior.
 
-Research note (per repo rule 6): raw httpx over the openai/anthropic SDKs —
-both APIs are single-POST JSON, the SDKs would add two dependency trees for a
+Research note (per repo rule 6): raw httpx over the openai/anthropic SDKs.
+Both APIs are single-POST JSON, the SDKs would add two dependency trees for a
 few dozen lines, and httpx is already a core dependency.
 """
 import json
@@ -32,7 +32,7 @@ class LLMProvider(ABC):
     def default_base_url(cls) -> str:
         return ""
 
-    # Single HTTP seam — tests monkeypatch this instead of mocking httpx.
+    # Single HTTP seam: tests monkeypatch this instead of mocking httpx.
     async def _post(self, url: str, payload: dict, headers: dict | None = None,
                     timeout: float = 60.0) -> dict:
         try:

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Runs &amp; rejects · Growth Engine{% endblock %}
+{% block content %}
+<h1 class="text-lg font-semibold mb-1">Find runs &amp; rejected candidates</h1>
+<div class="ink-m text-xs mb-4">A filter you cannot inspect is a filter you cannot
+  trust. Every candidate a run threw away is kept here with its reason, and can be
+  retried on demand.</div>
+
+{% include "_pipeline_nav.html" %}
+
+{% if msg %}<div class="card p-3 mb-4 text-sm" style="border-color:#3987e5">{{ msg }}</div>{% endif %}
+
+<div class="card overflow-x-auto mb-6">
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="px-4 py-3">Run</th><th class="px-2 py-3">Query</th>
+      <th class="px-2 py-3">Provider</th><th class="px-2 py-3">Kept</th>
+      <th class="px-2 py-3">Filtered</th><th class="px-2 py-3">Known</th>
+      <th class="px-2 py-3">Recovered</th><th class="px-2 py-3">Started</th>
+      <th class="px-2 py-3"></th>
+    </tr></thead>
+    <tbody>
+    {% for r in runs %}
+      {% set s = r.summary_json or {} %}
+      <tr class="row">
+        <td class="px-4 py-2.5">#{{ r.id }}</td>
+        <td class="px-2 py-2.5 font-medium">{{ r.query }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ r.provider }}</td>
+        <td class="px-2 py-2.5">{{ s.get('kept', 0) }}/{{ r.target }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ s.get('skipped', {}).values() | sum }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ s.get('skipped_known', 0) }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ s.get('websites_recovered', 0) }}</td>
+        <td class="px-2 py-2.5 ink-m text-xs">{{ r.started_at.strftime('%m-%d %H:%M') if r.started_at }}</td>
+        <td class="px-2 py-2.5">
+          <a class="btn text-xs" style="background: var(--surface-1)"
+             href="/pipeline/runs/{{ r.id }}.csv">Export run CSV</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="px-4 py-8 text-center ink-m">No runs yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="ink-m text-xs mb-2">Rejected candidates ({{ rejects | length }} most recent)</div>
+<div class="card overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="px-4 py-3">Name</th><th class="px-2 py-3">City</th>
+      <th class="px-2 py-3">Reason</th><th class="px-2 py-3">Run</th>
+      <th class="px-2 py-3">When</th><th class="px-2 py-3"></th>
+    </tr></thead>
+    <tbody>
+    {% for c in rejects %}
+      <tr class="row">
+        <td class="px-4 py-2.5 font-medium">{{ c.name }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ c.city or '' }}{% if c.country %} ({{ c.country }}){% endif %}</td>
+        <td class="px-2 py-2.5"><span class="badge">{{ c.reason }}</span></td>
+        <td class="px-2 py-2.5 ink-m text-xs">{{ c.run_id or '-' }}</td>
+        <td class="px-2 py-2.5 ink-m text-xs">{{ c.ts.strftime('%m-%d %H:%M') if c.ts }}</td>
+        <td class="px-2 py-2.5">
+          {% if c.retried %}<span class="ink-m text-xs">retried</span>
+          {% else %}
+          <form method="post" action="/pipeline/rejects/{{ c.id }}/retry">
+            <button class="btn text-xs" style="background: var(--surface-1)">Retry discovery</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="px-4 py-8 text-center ink-m">Nothing rejected yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

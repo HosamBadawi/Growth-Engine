@@ -1,6 +1,6 @@
 """Campaign profile: WHO is sending, WHAT they sell, and the offer numbers.
 
-This is the genericization backbone — the public repo ships neutral example
+This is the genericization backbone: the public repo ships neutral example
 values; the operator's real campaign lives in the local DB (Admin > Campaign)
 with .env as the bootstrap fallback. Everything that used to be hard-coded
 brand text (writer prompt, templates, signatures) renders from here.
@@ -36,6 +36,12 @@ class Campaign:
     default_job_value: int
     missed_calls_per_week: int
     source: str = "env"
+    # Which prospect segment this offer is for ("" = the default campaign,
+    # "no_website" = e.g. a web-design offer). Lets two offers coexist.
+    segment: str = ""
+    # Optional per-campaign template directory under data/templates/, so each
+    # offer can have its own copy without touching the other's.
+    template_dir: str = ""
 
     @property
     def is_placeholder(self) -> bool:
@@ -74,6 +80,48 @@ def _env_campaign() -> Campaign:
     )
 
 
+def campaign_for_segment(segment: str, session: Session | None = None) -> Campaign:
+    """Pick the campaign whose `segment` matches, else the active one.
+
+    Two offers coexist: the missed-call offer for businesses that already have a
+    site, and (for example) a web-design offer for the `no_website` segment.
+    Neither offer is hardcoded anywhere: both are just campaign rows.
+    """
+    own = session is None
+    if own:
+        from db.session import new_session
+
+        session = new_session()
+    try:
+        from sqlalchemy import select
+
+        rows = session.execute(
+            select(Connection).where(Connection.kind == ConnectionKind.CAMPAIGN)
+        ).scalars().all()
+        match = next((c for c in rows
+                      if (c.config_json or {}).get("segment") == segment and segment), None)
+        if match:
+            return _merge(_env_campaign(), match)
+        return get_campaign(session)
+    finally:
+        if own:
+            session.close()
+
+
+def _merge(base: Campaign, conn: Connection) -> Campaign:
+    cfg = conn.config_json or {}
+    data = asdict(base)
+    for key in data:
+        if key in ("source", "segment"):
+            continue
+        value = cfg.get(key)
+        if value not in (None, ""):
+            data[key] = type(data[key])(value)
+    data["source"] = f"connection:{conn.name}"
+    data["segment"] = cfg.get("segment", "")
+    return Campaign(**data)
+
+
 def get_campaign(session: Session | None = None) -> Campaign:
     """Active CAMPAIGN connection wins; .env values are the fallback."""
     own = session is None
@@ -89,16 +137,7 @@ def get_campaign(session: Session | None = None) -> Campaign:
     base = _env_campaign()
     if not conn:
         return base
-    cfg = conn.config_json or {}
-    data = asdict(base)
-    for key in data:
-        if key == "source":
-            continue
-        value = cfg.get(key)
-        if value not in (None, ""):
-            data[key] = type(data[key])(value)
-    data["source"] = f"connection:{conn.name}"
-    return Campaign(**data)
+    return _merge(base, conn)
 
 
 CAMPAIGN_FIELDS = [
@@ -116,4 +155,6 @@ CAMPAIGN_FIELDS = [
     ("job_value_by_trade", "Job value by trade (trade:dollars, comma separated)"),
     ("default_job_value", "Default job value ($)"),
     ("missed_calls_per_week", "Missed calls per week (ROI math)"),
+    ("segment", "Segment this offer targets (blank = default, e.g. no_website)"),
+    ("template_dir", "Template subfolder under data/templates (blank = shared)"),
 ]

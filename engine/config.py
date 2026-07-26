@@ -3,7 +3,7 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Hard rails — these are code constants on purpose. Env values can only lower
+# Hard rails: these are code constants on purpose. Env values can only lower
 # limits, never raise them above these.
 HARD_WARMUP_SCHEDULE = ((7, 10), (14, 20))  # (through_day, max_per_day)
 # Volume-based ramp too, so an idle/paused stretch cannot calendar-skip the
@@ -67,11 +67,15 @@ class Settings(BaseSettings):
     postal_address: str = "Example Co | your postal address here"
 
     prospect_provider: str = "registry"
+    # True = a prospect with no findable website is dropped (what a cold-email
+    # campaign wants). False = keep it as a 'no website' lead; those are never
+    # auto-emailed unless a verified address is found. See README, Phase 4.
+    require_website: bool = True
     # Google Places API (optional, off by default): the supported, ToS-compliant
     # way to get Google's business data. Requires a key; capped per day because
-    # every call costs money.
+    # every call costs money at the ENTERPRISE SKU (see providers/places.py).
     places_api_key: str = ""
-    places_daily_call_cap: int = 200
+    places_daily_call_cap: int = 30
     registry_default_state: str = "FL"
     registry_discover_websites: bool = True
     gosom_binary: str = "bin/google-maps-scraper.exe"

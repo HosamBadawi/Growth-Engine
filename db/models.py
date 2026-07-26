@@ -26,9 +26,12 @@ class ProspectStatus:
     LOST = "LOST"
     SUPPRESSED = "SUPPRESSED"
     FORM_ONLY = "FORM_ONLY"
+    # Terminal: enrichment/verification failed repeatedly. Kept and exportable
+    # (still a valid manual/no-website lead), but no longer re-processed every run.
+    UNREACHABLE = "UNREACHABLE"
 
     ALL = [NEW, ENRICHED, VERIFIED, DRAFTED, QUEUED, CONTACTED, REPLIED,
-           INTERESTED, CALL_BOOKED, WON, LOST, SUPPRESSED, FORM_ONLY]
+           INTERESTED, CALL_BOOKED, WON, LOST, SUPPRESSED, FORM_ONLY, UNREACHABLE]
 
 
 class VerificationLevel:
@@ -97,6 +100,17 @@ class Prospect(Base):
         String(20), default=VerificationLevel.NONE
     )
     contact_form_url: Mapped[Optional[str]] = mapped_column(String(1000))
+    # Public profile URLs only, collected as data, never fetched, never messaged
+    # automatically. {"instagram": "https://...", "whatsapp": "https://wa.me/..."}
+    social_links: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Where every discovered field came from and how confident we are:
+    # {"website": {"rung": "E", "source": "linktr.ee/x", "confidence": 0.9}}
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    country: Mapped[Optional[str]] = mapped_column(String(2))
+    # True when the discovery budget ran out before the ladder finished.
+    discovery_partial: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Failed enrichment/verification attempts; at the ceiling -> UNREACHABLE.
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     source: Mapped[str] = mapped_column(String(50), default="gosom")
     intel_json: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(20), default=ProspectStatus.NEW, index=True)
@@ -159,6 +173,39 @@ class Event(Base):
     level: Mapped[str] = mapped_column(String(10), default="INFO")
     message: Mapped[str] = mapped_column(Text)
     meta_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class FindRun(Base):
+    """One /find execution, so a run can be reviewed and exported after the fact
+    instead of vanishing into a log line."""
+
+    __tablename__ = "find_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    query: Mapped[str] = mapped_column(String(500))
+    provider: Mapped[str] = mapped_column(String(50))
+    target: Mapped[int] = mapped_column(Integer, default=0)
+    summary_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class RejectedCandidate(Base):
+    """A business the filters threw away, kept so a human can inspect and
+    re-try it. v2.1 discarded these silently; ten real leads vanished behind
+    the number '10' next to the word 'filtered'."""
+
+    __tablename__ = "rejected_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("find_runs.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    city: Mapped[Optional[str]] = mapped_column(String(100))
+    country: Mapped[Optional[str]] = mapped_column(String(2))
+    reason: Mapped[str] = mapped_column(String(200), index=True)
+    raw_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    retried: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ConnectionKind:

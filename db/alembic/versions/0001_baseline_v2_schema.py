@@ -5,8 +5,8 @@ Revises:
 Create Date: 2026-07-24
 
 Adopts the current declarative Base as the Alembic baseline. Uses create_all
-(checkfirst) so it is a no-op on a database that already has the tables — an
-existing v1/v2 install upgrades in place, its data untouched — while a fresh
+(checkfirst) so it is a no-op on a database that already has the tables: an
+existing v1/v2 install upgrades in place with its data untouched, while a fresh
 database gets the full schema. Future schema changes ship as new revisions.
 """
 from typing import Sequence, Union

@@ -1,7 +1,26 @@
 {% extends "base.html" %}
-{% block title %}{{ labels[stage] }} — Growth Engine{% endblock %}
+{% block title %}{{ labels[stage] }} · Growth Engine{% endblock %}
 {% block content %}
 {% include "_pipeline_nav.html" %}
+
+{% if segment_labels %}
+<div class="flex flex-wrap items-center gap-1.5 mb-4 text-xs">
+  <span class="ink-m mr-1">Segment</span>
+  {% for key, label in segment_labels.items() %}
+  <a href="/pipeline/{{ stage }}{% if key %}?segment={{ key }}{% endif %}"
+     class="btn text-xs {% if segment == key %}font-semibold{% else %}ink-2{% endif %}"
+     style="background: {{ 'var(--surface-1)' if segment == key else 'var(--page)' }}">
+    {{ label }} <span class="badge ml-1">{{ segment_counts.get(key, 0) }}</span></a>
+  {% endfor %}
+  {% if segment == 'no_website' %}
+  <span class="ink-m ml-2">These need a website built. They are never auto-emailed
+    unless a verified address is found.</span>
+  {% elif segment == 'manual' %}
+  <span class="ink-m ml-2">Form, phone or social only: <b>you</b> contact these,
+    the engine never will.</span>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="card overflow-x-auto">
   <table class="w-full text-sm">
@@ -28,7 +47,16 @@
         <td class="px-4 py-2.5 font-medium">
           <a href="/leads/{{ p.id }}">{{ p.name }}</a></td>
         <td class="px-2 py-2.5 ink-2">{{ p.trade or '' }} · {{ (p.city or '') | title }}</td>
-        <td class="px-2 py-2.5 ink-2">{{ p.email or p.phone or (p.contact_form_url and 'form') or '' }}</td>
+        <td class="px-2 py-2.5 ink-2">
+          {{ p.email or p.phone or (p.contact_form_url and 'form') or '' }}
+          {% if p.social_links %}
+            {% for platform, url in p.social_links.items() %}
+            <a href="{{ url }}" target="_blank" rel="noopener" class="badge ml-1"
+               title="Public profile: message manually; the engine never does">{{ platform }}</a>
+            {% endfor %}
+          {% endif %}
+          {% if not p.website %}<span class="badge ml-1" style="color:#c98500;border-color:#c98500">no website</span>{% endif %}
+        </td>
         {% if stage == 'in_sequence' %}
         <td class="px-2 py-2.5"><span class="badge">{{ row.sequence }}</span></td>
         <td class="px-2 py-2.5 ink-m text-xs">{{ row.next_at or 'reply pending / done' }}</td>

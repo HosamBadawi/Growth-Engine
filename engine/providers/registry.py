@@ -1,4 +1,4 @@
-"""RegistryProvider — US state contractor license registries (public records).
+"""RegistryProvider: US state contractor license registries (public records).
 
 v1: Florida DBPR daily CSV extracts (Ch. 119 public records, free bulk download).
 Gives the ground-truth universe of licensed HVAC/plumbing/electrical businesses
@@ -21,7 +21,8 @@ import httpx
 from bs4 import BeautifulSoup
 
 from engine.config import get_settings
-from engine.providers.base import ProspectProvider, RawProspect
+from engine.providers.base import (ProspectProvider, RawProspect,
+                                   tlds_for_country)
 from engine.util import utcnow
 
 log = logging.getLogger("prospector.registry")
@@ -206,6 +207,7 @@ def _iter_rows_for_trade(source: RegistrySource, trade: str, city: str,
                 category=trade,
                 city=row[source.col_city].strip().title(),
                 state=row[source.col_state].strip().upper() or source.state,
+                country="US",  # US state licence registries by definition
                 address=", ".join(p for p in [
                     row[source.col_addr].strip(),
                     row[source.col_city].strip().title(),
@@ -280,88 +282,28 @@ def _save_miss_cache(misses: dict) -> None:
     _atomic_write_json(_MISS_CACHE_FILE, misses)
 
 
-def _first_allowed(hrefs: list[str]) -> str:
-    """First candidate that is a plausible business site, not a directory."""
-    for href in hrefs:
-        match = re.search(r"uddg=([^&]+)", href)
-        if match:
-            from urllib.parse import unquote
-
-            href = unquote(match.group(1))
-        if href.startswith("http") and not any(b in href.lower() for b in _DISCOVERY_BLOCK):
-            return href
-    return ""
-
-
-# ── tier 1: domain guessing (no third party at all) ─────────────────────────
-
-_NAME_STOPWORDS = {
-    "llc", "inc", "corp", "co", "company", "corporation", "the", "of", "and",
-    "a", "an", "&", "services", "service", "enterprises", "group", "usa", "fl",
-}
-
-
-def _distinctive_tokens(business: str) -> list[str]:
-    return [t for t in re.findall(r"[a-z0-9]+", business.lower())
-            if t not in _NAME_STOPWORDS]
-
-
-def guess_domain(client: httpx.Client, business: str) -> str:
-    """Probe likely .com domains built from the business name; verify the page
-    actually mentions the business before accepting (parked-domain guard)."""
-    tokens = _distinctive_tokens(business)
-    if not tokens:
-        return ""
-    joined = "".join(tokens)
-    candidates = [joined]
-    if len(tokens) > 1:
-        candidates.append("".join(tokens[:2]))
-        candidates.append("-".join(tokens))
-    verify_tokens = [t for t in tokens if len(t) > 3] or tokens
-    for cand in dict.fromkeys(candidates):
-        if not (3 <= len(cand) <= 40):
-            continue
-        try:
-            # 3s: these hosts are alive or not; a longer wait buys nothing.
-            resp = client.get(f"https://{cand}.com", timeout=3, follow_redirects=True)
-            if resp.status_code == 200 and any(
-                t in resp.text[:8000].lower() for t in verify_tokens
-            ):
-                return f"https://{httpx.URL(str(resp.url)).host}"
-        except httpx.HTTPError:
-            continue
-    return ""
-
-
-# ── tier 2: keyless multi-engine search via ddgs (MIT) ──────────────────────
-
-# Valid ddgs 9.x backend names (verified live); startpage excluded, it serves
-# captchas to this region, and rotation lets no single engine absorb the batch.
-_SEARCH_BACKENDS = ["google", "brave", "duckduckgo", "mojeek", "yahoo"]
+# ── website discovery ────────────────────────────────────────────────────────
+# The ladder itself lives in engine/discovery.py so every caller (registry,
+# enricher, backfill) climbs the SAME rungs. These re-exports keep the historic
+# names importable from this module.
+from engine.discovery import (MAX_DOMAIN_PROBES, DiscoveryBudget,  # noqa: E402
+                              DiscoveryInput, discover_contacts,
+                              domain_candidates, guess_domain,
+                              search_candidates)
 
 
 def search_website(ddgs_client, business: str, city: str, state: str,
                    index: int) -> str:
-    """One paced lookup, rotating engines so no single one absorbs the batch.
+    """First acceptable (non-directory) search hit for a business."""
+    from engine.discovery import is_aggregator, is_linkinbio
 
-    Cost-capped: primary backend, then ONE alternate after a short pause, then
-    give up on this business. The old 15s->30s->60s escalation spent up to a
-    minute on what is usually an empty result; the miss cache (30-day TTL)
-    means we won't re-search it for a month anyway.
-    """
-    query = f"{business} {city} {state}"
-    backend = _SEARCH_BACKENDS[index % len(_SEARCH_BACKENDS)]
-    for attempt in range(2):
-        try:
-            results = ddgs_client.text(query, backend=backend, max_results=3)
-            hrefs = [r.get("href", "") for r in (results or [])]
-            return _first_allowed(hrefs)
-        except Exception as exc:  # noqa: BLE001 — ratelimit/timeout: rotate once
-            log.debug("search backend %s failed for %s: %s", backend, business, exc)
-            if attempt == 0:
-                time.sleep(8 + random.uniform(0, 3))
-                backend = _SEARCH_BACKENDS[(index + 1) % len(_SEARCH_BACKENDS)]
+    hits = search_candidates(ddgs_client, f"{business} {city} {state}", index,
+                             max_results=3)
+    for url in hits:
+        if url.startswith("http") and not is_aggregator(url) and not is_linkinbio(url):
+            return url
     return ""
+
 
 
 class RegistryProvider(ProspectProvider):
@@ -394,7 +336,7 @@ class RegistryProvider(ProspectProvider):
             if progress:
                 try:
                     progress(text)
-                except Exception:  # noqa: BLE001 — progress is best-effort
+                except Exception:  # noqa: BLE001 (progress is best-effort)
                     pass
 
         discover = settings.registry_discover_websites
@@ -423,7 +365,7 @@ class RegistryProvider(ProspectProvider):
                             source_done = False
                             break
 
-                        # Cheap exclusion BEFORE any network work — the whole point.
+                        # Cheap exclusion BEFORE any network work: the whole point.
                         if raw.dedupe_key in exclude_keys:
                             self.last_skipped_known += 1
                             continue
@@ -440,7 +382,8 @@ class RegistryProvider(ProspectProvider):
                         elif key in misses:
                             stats["known_miss"] += 1  # no site last month; skip cheaply
                         else:
-                            raw.website = guess_domain(client, raw.name)
+                            raw.website = guess_domain(client, raw.name,
+                                                       raw.country or "US")
                             if raw.website:
                                 stats["guessed"] += 1
                             else:

@@ -4,12 +4,12 @@
 
 An open-source AI outbound machine: find prospect clients, research them, write
 personalized emails with **local or API LLMs**, send safely behind hard
-deliverability rails, watch replies, and track everything  commanded from
+deliverability rails, watch replies, and track everything, commanded from
 Telegram, observed on a local web dashboard.
 
 Runs 100% free on a local [Ollama](https://ollama.com) model out of the box; plug
 in OpenAI, Anthropic, OpenRouter, Groq, or any OpenAI-compatible API from the
-dashboard when you want to. Defaults to `DRY_RUN`  it writes `.eml` files to
+dashboard when you want to. Defaults to `DRY_RUN`: it writes `.eml` files to
 `/outbox` and sends nothing until you deliberately go live.
 
 ```
@@ -21,7 +21,7 @@ TELEGRAM BOT (aiogram 3) ──► ORCHESTRATOR (FastAPI + APScheduler)
 
 ## Features
 
-- **Multi-provider LLM layer**  local Ollama by default (zero config, zero cost);
+- **Multi-provider LLM layer**: local Ollama by default (zero config, zero cost);
   add OpenAI / Anthropic / OpenRouter / Groq / any OpenAI-compatible endpoint from
   Admin → Models, assignable per role (writer / classifier / researcher). API
   providers are cost-guarded with a daily call cap and automatic fallback to local.
@@ -29,20 +29,26 @@ TELEGRAM BOT (aiogram 3) ──► ORCHESTRATOR (FastAPI + APScheduler)
   (public records, zero-risk, the default), a Google Maps scraper, or CSV import.
 - **Enricher** crawls each prospect's site (robots-aware) for emails, owner names,
   and negative signals (no chat widget / no online booking = a better prospect).
-- **Verifier**  syntax → MX → optional SMTP probe, with graceful port-25
+- **Verifier**: syntax → MX → optional SMTP probe, with graceful port-25
   degradation. Unverifiable addresses are never sent to.
-- **Researcher**  summarize the scraped site (local) or run real web deep-research
+- **Researcher**: summarize the scraped site (local) or run real web deep-research
   per prospect (web mode), distilled into a 3-bullet intel card.
-- **Writer**  personalized cold emails from your campaign profile + templates,
+- **Writer**: personalized cold emails from your campaign profile + templates,
   with machine-enforced style rules and a deterministic template fallback.
 - **Sender** with sacred deliverability rails (below), warm-up ramp, send window,
   jitter, suppression, bounce circuit breaker, and Day 0/3/6/10 sequences that
   cancel the instant a reply arrives.
-- **Reply watcher**  IMAP poll → LLM classification → Telegram alert with a
+- **Reply watcher**: IMAP poll → LLM classification → Telegram alert with a
   suggested reply you approve, edit, or ignore.
-- **Full admin dashboard**  models, campaign profile, sending rails (tighten-only),
+- **Contact discovery ladder**: turns a bare business name into a website, email,
+  phone and public social profiles, recording where every field came from and how
+  confident it is. Public pages only; no login walls, no messaging outside email.
+- **Segments**: no-website / emailable / manual-only, with a second campaign
+  profile so a web-build offer can coexist with your main one.
+- **Backfill**: point the ladder at prospects you already have.
+- **Full admin dashboard**: models, campaign profile, sending rails (tighten-only),
   email templates with live preview, prospector, suppression, data tools, health.
-- **Telegram command center**  run the whole machine from your phone.
+- **Telegram command center**: run the whole machine from your phone.
 
 ## Quickstart
 
@@ -59,7 +65,7 @@ environment, installs everything, and copies `.env.example` to `.env`; after
 that it starts in seconds. Set a strong `DASHBOARD_PASSWORD` in `.env`.
 
 To reach the dashboard from your phone, double-click **`start-with-phone-access.bat`**
-instead — it prints a free `https://<random>.trycloudflare.com` link (no account,
+instead. It prints a free `https://<random>.trycloudflare.com` link (no account,
 no port forwarding; requires `bin/cloudflared.exe` and a non-default password).
 
 ### Windows (manual) / Linux / macOS
@@ -76,7 +82,7 @@ copy .env.example .env              # Linux/macOS: cp; then set DASHBOARD_PASSWO
 .venv\Scripts\python.exe run.py     # Linux/macOS: .venv/bin/python run.py
 ```
 
-> Use the venv's Python, not a bare `python run.py` — a system Python without the
+> Use the venv's Python, not a bare `python run.py`. A system Python without the
 > project's packages fails with `No module named 'aiogram'`. `start.bat` avoids this.
 
 ### Linux / macOS
@@ -92,14 +98,14 @@ python run.py
 Dashboard: <http://localhost:8080> (password = `DASHBOARD_PASSWORD`). On first run
 the engine verifies your models exist in Ollama and prints tokens/sec so you can
 tune. Telegram and email are optional and configured from **Admin → Connections**
-(saved in the local DB, n8n style)  the dashboard and CLI work without them.
+(saved in the local DB, n8n style). The dashboard and CLI work without them.
 
 Then open **Admin → Campaign** and fill in your company, pitch, links, and
 signature. Until you do, the engine runs a clearly-marked example campaign and
 shows a banner.
 
-New to it? A plain-English, non-technical walkthrough of every feature — including
-how to collect and review prospects with **no email sent** — is in
+New to it? A plain-English, non-technical walkthrough of every feature, including
+how to collect and review prospects with **no email sent**, is in
 [`docs/Growth-Engine-User-Guide.pdf`](docs/Growth-Engine-User-Guide.pdf).
 
 ## Configuration
@@ -135,7 +141,7 @@ database, with `.env` as the fallback.
 - **Registry**: bulk CSV public records. Adding a state is one entry in
   `engine/providers/registry.py`. Re-runs skip already-known businesses before
   any website discovery, so `/find ... 10` always chases 10 *new* prospects.
-- **OSM (OpenStreetMap)**: keyless and worldwide — restaurants in Giza, cafes in
+- **OSM (OpenStreetMap)**: keyless and worldwide. Restaurants in Giza, cafes in
   Alexandria, any tagged niche anywhere. Respects the public Overpass instance
   usage policy (descriptive User-Agent, ≥2s between queries, backoff on 429/504,
   7-day response cache). **Heavy users should self-host an Overpass instance**
@@ -143,11 +149,11 @@ database, with `.env` as the fallback.
   name-substring match and say so in the log.
 - **Google Places**: the legitimate, ToS-compliant way to get Google's business
   data. Costs real money per call: a free allowance exists, but pricing has been
-  restructured over time and sources conflict — **confirm the current figure in
-  your own Cloud Console before enabling**, which is exactly why the daily cap
-  (`PLACES_DAILY_CALL_CAP`, default 200) defaults low and the engine stops hard
-  at the cap instead of silently spending. Every call is logged with its SKU in
-  the Activity page.
+  restructured over time and sources conflict, so **confirm the current figure in
+  your own Cloud Console before enabling**. That uncertainty is exactly why the
+  daily cap (`PLACES_DAILY_CALL_CAP`, default 200) defaults low and the engine
+  stops hard at the cap instead of silently spending. Every call is logged with
+  its SKU in the Activity page.
 - **Google Maps (gosom)**: wraps the MIT `gosom/google-maps-scraper` binary as a
   subprocess. Google fingerprints headless automation, so this is most reliable
   from a US residential/VPS egress; some networks see it fail with
@@ -220,11 +226,87 @@ Schema migrations run automatically at startup (Alembic). A nightly job backs up
 the SQLite database to `data/backups/`. `GET /healthz` returns engine status JSON
 (localhost, no auth).
 
+## Contact discovery
+
+Providers give you a business name; they rarely give you a way to reach it. The
+ladder in `engine/discovery.py` closes that gap, climbing cheapest-first and
+stopping as soon as it has what it needs:
+
+| Rung | What it does | Cost |
+|---|---|---|
+| A | provider data already in hand (OSM tags, Places fields) | free |
+| B | country-aware domain guess, verified against page content | ~4 probes |
+| C | scored web search: candidates, never first-hit | paced |
+| D | public social profile URLs from the results and the site | free |
+| E | link-in-bio page (Linktree and friends) → the real domain | 1 fetch |
+| F | site crawl for emails and the contact form, multilingual paths | bounded |
+| G | phone consolidation (provider, `wa.me`, `tel:`, page text) | free |
+
+Every field it fills records **where it came from and how confident it is**, and
+you can see that in the UI and in every CSV export. There is a hard per-business
+wall-clock ceiling (default 25s); when it is hit you get partial results, never a
+hang.
+
+**A wrong website is worse than no website.** The domain has to resemble the
+business, not merely mention it: a directory, a magazine listing or a
+domain-parking page will happily echo a business name back at you, and treating
+one as "their site" means mining a stranger's address and cold-emailing them.
+Candidates that cannot clear that bar are discarded rather than guessed at.
+
+### What this deliberately will not do
+
+These are product decisions, documented so nobody removes them thinking they were
+oversights:
+
+- **No login walls.** Only public pages are fetched: a business's own site, a
+  public link-in-bio page, a search results page. Instagram and Facebook profile
+  URLs are recorded as *data* and never opened. No private or mobile APIs, no
+  logged-in browser sessions.
+- **No automated messaging outside email.** Social handles are surfaced so *you*
+  can message someone manually. There is no DM bot, queue or scheduler for
+  Instagram, Facebook, WhatsApp or anything else whose terms prohibit
+  unsolicited automated contact. Email is the only automated channel here.
+- **No bot-detection evasion.** No proxy rotation, no fingerprint spoofing, no
+  CAPTCHA handling. `robots.txt` is respected on every fetch, including
+  link-in-bio pages; if a site says no, the engine skips it and records why.
+
+## Segments and the no-website lead
+
+With `require_website` off, a business with no findable site stops being a reject
+and becomes its own segment, often the most valuable one, because they are the
+ones who need a site built. The pipeline pages let you filter by:
+
+- **No website**: candidates for a web-build offer.
+- **Emailable**: a verified address exists, so the engine may contact them.
+- **Manual only**: form, phone or social handle only. **You** contact these; the
+  engine never will.
+
+That distinction is enforced in the queueing logic, not just labelled in the UI:
+a prospect without a verified email is refused when drafts are queued *and* again
+before any send. You can configure a second campaign profile targeting the
+`no_website` segment so a web-design offer coexists with your main offer, each
+with its own pitch, links and templates.
+
+## Backfill
+
+A discovery upgrade that only applies to future finds is worth a fraction of one
+you can point at rows you already have:
+
+```
+/enrich no_website 25
+```
+
+or the same control on the Actions page. Filters: `no_website`, `no_email`,
+`never_enriched`, `no_contact`, `unreachable`. It is resumable, uses the same
+budgets and pacing as a live run, and **never overwrites a higher-confidence
+value with a lower-confidence one**: provenance decides, so a verified fact
+always beats a fresh guess.
+
 ## Responsible use
 
 This is a tool for **legitimate B2B outreach**. You are responsible for complying
-with the laws of your jurisdiction and your recipients'  including the US CAN-SPAM
-Act and similar regulations  for honoring opt-outs promptly (the engine suppresses
+with the laws of your jurisdiction and your recipients', including the US CAN-SPAM
+Act and similar regulations, for honoring opt-outs promptly (the engine suppresses
 them forever automatically), and for respecting the terms of service of every data
 source you configure. Cold outreach carries legal and reputational risk; the safety
 rails reduce it but do not remove your responsibility. Do not use this for spam.
@@ -239,7 +321,7 @@ rails reduce it but do not remove your responsibility. Do not use this for spam.
 
 ## Architecture notes
 
-- Every LLM call goes through `engine/llm/`  swap providers without touching call
+- Every LLM call goes through `engine/llm/`: swap providers without touching call
   sites. Every prospect source implements `ProspectProvider`. The sender/bot can
   later move to a small VPS while Ollama stays on your PC (set `OLLAMA_BASE_URL` to
   your PC's private-network IP).
@@ -247,4 +329,4 @@ rails reduce it but do not remove your responsibility. Do not use this for spam.
 
 ## License
 
-MIT  see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

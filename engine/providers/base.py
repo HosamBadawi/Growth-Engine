@@ -25,6 +25,7 @@ class RawProspect:
     source: str = ""
     owner_name: str = ""
     license_no: str = ""
+    country: str = ""  # ISO-3166 alpha-2 when the source knows it; drives TLD guessing
 
     @property
     def dedupe_key(self) -> str:
@@ -54,13 +55,19 @@ class ProspectProvider(ABC):
 
         exclude_keys: dedupe keys already in the database. Providers that can
         compute a key cheaply (registry) MUST skip those candidates before any
-        expensive per-candidate work (website discovery). Others may ignore it —
+        expensive per-candidate work (website discovery). Others may ignore it:
         the prospector's _is_duplicate() remains the correctness backstop.
 
         progress: optional sync callback for human-readable progress lines
         during long runs. Providers may ignore it.
         """
 
+
+# Country/TLD helpers live in engine.discovery (the lower-level module, so
+# providers can import from it without a cycle). Re-exported here because
+# providers and their tests have always imported them from this module.
+from engine.discovery import (COUNTRY_TLDS, country_from_address,  # noqa: E402
+                              tlds_for_country)
 
 _STATE_RE = re.compile(r",\s*([A-Za-z .]+?),\s*([A-Z]{2})\b")
 

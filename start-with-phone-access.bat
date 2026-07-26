@@ -1,5 +1,5 @@
 @echo off
-REM Growth Engine — start WITH the free Cloudflare tunnel so you can open the
+REM Growth Engine: start WITH the free Cloudflare tunnel so you can open the
 REM dashboard from your phone. Prints a https://...trycloudflare.com link.
 REM Requires a real DASHBOARD_PASSWORD in .env (not "changeme").
 setlocal

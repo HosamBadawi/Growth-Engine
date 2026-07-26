@@ -528,7 +528,7 @@ async def templates_page(request: Request, msg: str = "", name: str = "initial.j
         try:
             preview_subject, preview_body = render_email_template(name, sample)
             violations = check_style(preview_subject, preview_body, sample, touch_type)
-        except Exception as exc:  # noqa: BLE001 — broken override must not 500
+        except Exception as exc:  # noqa: BLE001 (broken override must not 500)
             render_error = str(exc)[:300]
     else:
         try:
@@ -582,16 +582,19 @@ async def templates_reset(name: str = Form(...)):
 
 @router.get("/prospector")
 async def prospector_page(request: Request, msg: str = ""):
-    from engine.prospector_settings import (VALID_PROVIDERS,
-                                            eff_franchise_keywords,
+    from engine.providers import provider_availability
+    from engine.prospector_settings import (eff_franchise_keywords,
                                             eff_provider, eff_registry_state,
-                                            eff_review_bounds)
+                                            eff_require_website,
+                                            eff_review_bounds, valid_providers)
 
     min_reviews, max_reviews = eff_review_bounds()
     return templates.TemplateResponse(request, "admin_prospector.html", {
         "msg": msg, "active": "admin", "admin_tab": "prospector",
-        "providers": VALID_PROVIDERS, "provider": eff_provider(),
+        "providers": valid_providers(), "provider": eff_provider(),
+        "availability": provider_availability(),
         "registry_state": eff_registry_state(),
+        "require_website": eff_require_website(),
         "min_reviews": min_reviews, "max_reviews": max_reviews,
         "franchise_keywords": ", ".join(eff_franchise_keywords()),
     })
@@ -599,6 +602,7 @@ async def prospector_page(request: Request, msg: str = ""):
 
 @router.post("/prospector/save")
 async def prospector_save(provider: str = Form(""), registry_state: str = Form(""),
+                          require_website: str = Form(""),
                           min_review_count: str = Form(""),
                           max_review_count: str = Form(""),
                           franchise_keywords: str = Form("")):
@@ -608,6 +612,7 @@ async def prospector_save(provider: str = Form(""), registry_state: str = Form("
     try:
         stored = save_overrides(session, {
             "provider": provider, "registry_state": registry_state,
+            "require_website": bool(require_website),
             "min_review_count": min_review_count,
             "max_review_count": max_review_count,
             "franchise_keywords": franchise_keywords,
@@ -733,7 +738,7 @@ async def data_import(file: UploadFile = File(...), trade: str = Form("")):
             f"Imported: kept {summary['kept']} of {summary['found']} "
             f"({summary['duplicates']} duplicates). Run /find or the pipeline "
             f"to enrich + verify.", "/admin/data")
-    except Exception as exc:  # noqa: BLE001 — bad CSVs must not 500 the panel
+    except Exception as exc:  # noqa: BLE001 (bad CSVs must not 500 the panel)
         return _redirect(f"Import failed: {str(exc)[:200]}", "/admin/data")
     finally:
         session.close()

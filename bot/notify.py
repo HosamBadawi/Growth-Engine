@@ -39,6 +39,6 @@ async def notify(text: str, reply_markup=None) -> bool:
             disable_web_page_preview=True,
         )
         return True
-    except Exception as exc:  # noqa: BLE001 — alerting must never crash the engine
+    except Exception as exc:  # noqa: BLE001 (alerting must never crash the engine)
         log.warning("Telegram notify failed: %s", exc)
         return False

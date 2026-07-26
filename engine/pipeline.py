@@ -23,8 +23,30 @@ async def _report(cb: ProgressCb | None, text: str) -> None:
     if cb:
         try:
             await cb(text)
-        except Exception:  # noqa: BLE001 — progress updates are best-effort
+        except Exception:  # noqa: BLE001 (progress updates are best-effort)
             pass
+
+
+MAX_ATTEMPTS = 3
+
+
+def _record_attempt(session, prospect, reason: str) -> None:
+    """Count a failure; at the ceiling the prospect goes terminal (UNREACHABLE)
+    so it stops consuming budget on every future run. It stays visible and
+    exportable: it is a valid manual lead, not a deletion."""
+    try:
+        prospect.attempt_count = (prospect.attempt_count or 0) + 1
+        if prospect.attempt_count >= MAX_ATTEMPTS:
+            prospect.status = ProspectStatus.UNREACHABLE
+            intel = dict(prospect.intel_json or {})
+            intel["unreachable_reason"] = reason[:300]
+            prospect.intel_json = intel
+            log_event(session, "pipeline",
+                      f"{prospect.name}: UNREACHABLE after {MAX_ATTEMPTS} attempts "
+                      f"({reason[:120]})", level="WARNING")
+        session.commit()
+    except Exception:  # noqa: BLE001 (bookkeeping must never break a run)
+        session.rollback()
 
 
 async def run_find(trade: str, city: str, limit: int,
@@ -61,22 +83,31 @@ async def run_find(trade: str, city: str, limit: int,
                 f"already known. Try another city or trade.",
             )
 
+        # Scope every stage to THIS run's prospects. Selecting by status alone
+        # re-processed the whole database on every run forever: a run that kept
+        # zero new prospects still reported "Verifying 31 prospects...", and run
+        # times grew without bound.
+        run_ids = summary.get("prospect_ids") or []
         new_prospects = session.execute(
-            select(Prospect).where(Prospect.status == ProspectStatus.NEW)
-        ).scalars().all()
+            select(Prospect).where(Prospect.id.in_(run_ids),
+                                   Prospect.status == ProspectStatus.NEW)
+        ).scalars().all() if run_ids else []
         await _report(progress, f"Enriching {len(new_prospects)} websites...")
         enriched = 0
-        for prospect in new_prospects:
+        for index, prospect in enumerate(new_prospects):
             try:
-                await asyncio.to_thread(enrich_prospect, session, prospect)
+                await asyncio.to_thread(enrich_prospect, session, prospect,
+                                        progress=progress, index=index)
                 enriched += 1
-            except Exception as exc:  # noqa: BLE001 — one bad site must not stop the batch
+            except Exception as exc:  # noqa: BLE001 (one bad site must not stop the batch)
                 log.warning("enrich failed for %s: %s", prospect.name, exc)
                 session.rollback()
+                _record_attempt(session, prospect, f"enrich failed: {exc}")
 
         to_verify = session.execute(
-            select(Prospect).where(Prospect.status == ProspectStatus.ENRICHED)
-        ).scalars().all()
+            select(Prospect).where(Prospect.id.in_(run_ids),
+                                   Prospect.status == ProspectStatus.ENRICHED)
+        ).scalars().all() if run_ids else []
         await _report(progress, f"Verifying {len(to_verify)} prospects...")
         verified = form_only = failed = 0
         for prospect in to_verify:
@@ -91,6 +122,7 @@ async def run_find(trade: str, city: str, limit: int,
             except Exception as exc:  # noqa: BLE001
                 log.warning("verify failed for %s: %s", prospect.name, exc)
                 session.rollback()
+                _record_attempt(session, prospect, f"verify failed: {exc}")
                 failed += 1
 
         result = {

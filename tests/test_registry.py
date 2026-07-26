@@ -2,9 +2,9 @@
 import pytest
 
 from engine.providers import registry
-from engine.providers.registry import (STATE_SOURCES, _first_allowed,
-                                       _iter_rows_for_trade, _title_case_business,
-                                       _title_case_owner, parse_registry_query)
+from engine.providers.registry import (STATE_SOURCES, _iter_rows_for_trade,
+                                       _title_case_business, _title_case_owner,
+                                       parse_registry_query)
 
 
 def _rows_for_trade(source, trade, city, limit=10):
@@ -73,22 +73,28 @@ def test_title_casing():
 
 
 def test_distinctive_tokens_for_domain_guessing():
-    from engine.providers.registry import _distinctive_tokens
+    # Lives in engine.discovery since v2.2; registry climbs the shared ladder.
+    from engine.discovery import distinctive_tokens
 
-    assert _distinctive_tokens("Cool Breeze Air LLC") == ["cool", "breeze", "air"]
-    assert _distinctive_tokens("The Clean Plumbers, Inc.") == ["clean", "plumbers"]
-    assert _distinctive_tokens("A & E Service Co") == ["e"]
+    assert distinctive_tokens("Cool Breeze Air LLC") == ["cool", "breeze", "air"]
+    assert distinctive_tokens("The Clean Plumbers, Inc.") == ["clean", "plumbers"]
+    # single letters are dropped: you cannot guess a domain from "e"
+    assert distinctive_tokens("A & E Service Co") == []
+    # accents are folded, or the regex would split 'Glória' into 'gl' + 'ria'
+    assert distinctive_tokens("Glória Gourmet") == ["gloria", "gourmet"]
 
 
 def test_website_discovery_skips_directories():
-    hrefs = [
-        "https://www.yelp.com/biz/grable-plumbing",
-        "https://www.superpages.com/tampa-fl/x",
-        "https://grableplumbing.com/",
-        "https://www.facebook.com/grable",
-    ]
-    assert _first_allowed(hrefs) == "https://grableplumbing.com/"
-    assert _first_allowed(["https://www.bbb.org/x", "https://angi.com/y"]) == ""
+    """Directories and social platforms are never accepted as the website."""
+    from engine.discovery import _unwrap_redirect, is_aggregator, classify_social
+
+    assert is_aggregator("https://www.yelp.com/biz/grable-plumbing")
+    assert is_aggregator("https://www.superpages.com/tampa-fl/x")
+    assert is_aggregator("https://www.bbb.org/x")
+    assert is_aggregator("https://angi.com/y")
+    assert not is_aggregator("https://grableplumbing.com/")
+    # a facebook URL is a social profile, not a website
+    assert classify_social("https://www.facebook.com/grable")[0] == "facebook"
     # DuckDuckGo redirect-wrapped URLs get unwrapped
-    wrapped = ["//duckduckgo.com/l/?uddg=https%3A%2F%2Fcoolbreezeair.com%2F&rut=abc"]
-    assert _first_allowed(wrapped) == "https://coolbreezeair.com/"
+    wrapped = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fcoolbreezeair.com%2F&rut=abc"
+    assert _unwrap_redirect(wrapped) == "https://coolbreezeair.com/"

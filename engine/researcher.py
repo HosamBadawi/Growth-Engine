@@ -1,4 +1,4 @@
-"""Module 4 — Researcher: turn scraped intel into a 3-bullet personalization card.
+"""Module 4, Researcher: turn scraped intel into a 3-bullet personalization card.
 
 v1: summarize enricher output via local Ollama.
 v2 (interface ready): plug in gpt-researcher (Apache-2.0, works with Ollama +
@@ -152,7 +152,7 @@ async def build_intel_card(session: Session, prospect: Prospect,
     researcher = get_researcher()
     try:
         card = await researcher.build_card(prospect)
-    except Exception as exc:  # noqa: BLE001 — a failed card must never stop drafting
+    except Exception as exc:  # noqa: BLE001 (a failed card must never stop drafting)
         if not isinstance(exc, (LLMError, LookupError)):
             log.exception("researcher crashed for %s", prospect.name)
         log_event(session, "researcher",

@@ -1,5 +1,5 @@
 """OpenAI-compatible provider. One class covers OpenAI/ChatGPT, OpenRouter,
-Groq, DeepSeek, Together, LM Studio, and even Ollama's own /v1 endpoint — any
+Groq, DeepSeek, Together, LM Studio, and even Ollama's own /v1 endpoint: any
 server speaking POST /chat/completions.
 """
 from engine.llm.base import LLMError, LLMProvider

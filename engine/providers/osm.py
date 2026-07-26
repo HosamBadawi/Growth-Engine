@@ -1,12 +1,12 @@
-"""OsmProvider — OpenStreetMap via the Overpass API.
+"""OsmProvider: OpenStreetMap via the Overpass API.
 
 Free, keyless, worldwide, open data (ODbL), no ToS conflict, no bot detection.
 This is the provider for arbitrary niches in arbitrary cities: restaurants in
-Cairo, pharmacies in Alexandria, cafes anywhere — places no license registry
-covers.
+Cairo, pharmacies in Alexandria, cafes anywhere (places no license registry
+covers).
 
 Research note (repo rule 6): raw httpx against Overpass/Nominatim instead of
-the `overpy`/`OSMPythonTools` wrappers — both add dependency weight for two
+the `overpy`/`OSMPythonTools` wrappers. Both add dependency weight for two
 POST requests, and neither handles our caching/rate-limit policy anyway.
 
 Usage policy (https://dev.overpass-api.de/overpass-doc/en/preface/commons.html):
@@ -137,30 +137,40 @@ def _request_json(client: httpx.Client, method: str, url: str, *,
     return None
 
 
-def resolve_area_id(client: httpx.Client, place: str) -> int | None:
-    """City/region name -> Overpass area id via Nominatim (cached 7 days)."""
-    cached = _cache_get(f"nominatim_{place}")
-    if cached is not None:
-        return cached or None
+def resolve_area(client: httpx.Client, place: str) -> tuple[int | None, str]:
+    """City/region name -> (Overpass area id, ISO country code), cached 7 days.
+
+    The country code drives country-aware domain guessing downstream: without
+    it, a Brazilian restaurant only ever gets probed at `.com`.
+    """
+    cached = _cache_get(f"nominatim2_{place}")
+    if isinstance(cached, dict):
+        return (cached.get("area_id") or None), (cached.get("country") or "")
     data = _request_json(
         client, "GET", NOMINATIM_URL,
-        params={"q": place, "format": "json", "limit": 5},
+        params={"q": place, "format": "json", "limit": 5, "addressdetails": 1},
         headers={"User-Agent": USER_AGENT},
     )
-    area_id = None
+    area_id, country = None, ""
     for hit in data or []:
         osm_type, osm_id = hit.get("osm_type"), hit.get("osm_id")
+        code = ((hit.get("address") or {}).get("country_code") or "").upper()
         if osm_type == "relation":
-            area_id = 3600000000 + int(osm_id)
+            area_id, country = 3600000000 + int(osm_id), code or country
             break
         if osm_type == "way" and area_id is None:
-            area_id = 2400000000 + int(osm_id)
-    _cache_put(f"nominatim_{place}", area_id or 0)
-    return area_id
+            area_id, country = 2400000000 + int(osm_id), code or country
+    _cache_put(f"nominatim2_{place}", {"area_id": area_id or 0, "country": country})
+    return area_id, country
+
+
+def resolve_area_id(client: httpx.Client, place: str) -> int | None:
+    """Back-compat shim for callers that only need the area id."""
+    return resolve_area(client, place)[0]
 
 
 def tags_for_niche(niche: str) -> tuple[list[str], bool]:
-    """(tag filters, matched) — unknown niches fall back to name matching."""
+    """(tag filters, matched). Unknown niches fall back to name matching."""
     key = niche.strip().lower()
     if key in NICHE_TAGS:
         return NICHE_TAGS[key], True
@@ -180,7 +190,8 @@ def build_query(area_id: int, tag_filters: list[str], limit: int) -> str:
             f"out center tags {max(limit * 3, 60)};")
 
 
-def parse_elements(elements: list[dict], niche: str, city: str) -> list[RawProspect]:
+def parse_elements(elements: list[dict], niche: str, city: str,
+                   country: str = "") -> list[RawProspect]:
     out = []
     for el in elements or []:
         tags = el.get("tags") or {}
@@ -206,6 +217,7 @@ def parse_elements(elements: list[dict], niche: str, city: str) -> list[RawProsp
             city=(tags.get("addr:city") or city).title(),
             state=tags.get("addr:state", ""),
             maps_url=f"https://www.openstreetmap.org/{el.get('type')}/{el.get('id')}",
+            country=(tags.get("addr:country") or country or "").strip().upper()[:2],
             emails=[tags["email"]] if tags.get("email") else (
                 [tags["contact:email"]] if tags.get("contact:email") else []),
             source="osm",
@@ -245,9 +257,10 @@ class OsmProvider(ProspectProvider):
 
         cache_key = f"overpass_{niche}_{city}"
         data = _cache_get(cache_key)
+        country = ""
         with httpx.Client(headers={"User-Agent": USER_AGENT}) as client:
+            area_id, country = resolve_area(client, city)  # cached; also gives country
             if data is None:
-                area_id = resolve_area_id(client, city)
                 if not area_id:
                     raise ValueError(f"OSM could not resolve area for '{city}'")
                 overpass_query = build_query(area_id, tag_filters, limit)
@@ -255,7 +268,7 @@ class OsmProvider(ProspectProvider):
                                      data={"data": overpass_query})
                 _cache_put(cache_key, data)
 
-        candidates = parse_elements((data or {}).get("elements"), niche, city)
+        candidates = parse_elements((data or {}).get("elements"), niche, city, country)
         results: list[RawProspect] = []
         for raw in candidates:
             if raw.dedupe_key in exclude_keys:

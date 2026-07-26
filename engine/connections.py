@@ -158,7 +158,7 @@ async def test_telegram(token: str, user_id: int) -> tuple[bool, str]:
         finally:
             await bot.session.close()
         return True, detail
-    except Exception as exc:  # noqa: BLE001 — surfaced verbatim in the admin UI
+    except Exception as exc:  # noqa: BLE001 (surfaced verbatim in the admin UI)
         return False, str(exc)[:300]
 
 

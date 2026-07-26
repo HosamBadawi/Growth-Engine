@@ -1,4 +1,4 @@
-"""Backward-compatible shim over engine.llm — v1 call sites keep working.
+"""Backward-compatible shim over engine.llm, so v1 call sites keep working.
 
 New code should use engine.llm (llm_chat_json / llm_chat_text / resolve_role).
 """

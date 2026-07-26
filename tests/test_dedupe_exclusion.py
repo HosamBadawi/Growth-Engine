@@ -84,7 +84,7 @@ def test_registry_reports_exhaustion(monkeypatch):
     monkeypatch.setattr(reg, "_load_miss_cache", lambda: {})
     monkeypatch.setattr(reg, "_save_website_cache", lambda c: None)
     monkeypatch.setattr(reg, "_save_miss_cache", lambda c: None)
-    monkeypatch.setattr(reg, "guess_domain", lambda c, n: "https://x.example")
+    monkeypatch.setattr(reg, "guess_domain", lambda c, n, country=None: "https://x.example")
 
     provider = reg.RegistryProvider()
     # ask for 10 but the city has 1 -> exhausted

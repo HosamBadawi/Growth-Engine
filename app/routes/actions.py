@@ -18,6 +18,7 @@ from app.jobs import job_state, latest_job_id, start_job
 from app.routes.dashboard import templates
 from db.models import Touch, TouchStatus
 from db.session import new_session
+from engine.backfill import FILTERS as BACKFILL_FILTERS
 from engine.config import get_settings
 from engine.events import log_event
 from engine.providers import provider_availability
@@ -56,6 +57,7 @@ async def actions_page(request: Request, msg: str = "", job: int | None = None):
         "mode": settings.engine_mode.upper(), "live_confirmed": live_confirmed,
         "report": report, "approved_count": len(approved),
         "draft_count": len(drafts), "job_id": job_id, "active": "actions",
+        "backfill_filters": BACKFILL_FILTERS,
         "providers": provider_availability(),
         "default_provider": settings.prospect_provider,
     })
@@ -102,6 +104,47 @@ async def action_draft():
 
     job_id = start_job("generate drafts", factory)
     return _back("Draft generation started (local LLM, this can take a while).", job_id)
+
+
+@router.post("/enrich")
+async def action_enrich(filter_key: str = Form("no_website"),
+                        count: str = Form("25")):
+    """Phase 5 backfill from the browser: same ladder, budgets and pacing."""
+    import asyncio
+
+    from engine.backfill import FILTERS, run_backfill
+
+    if filter_key not in FILTERS:
+        return _back(f"Unknown filter '{filter_key}'.")
+    try:
+        limit = max(1, min(int(count), 200))
+    except ValueError:
+        return _back("Count must be a number.")
+
+    async def factory(progress):
+        # run_backfill is sync and runs in a worker thread, but `progress` is a
+        # coroutine function owned by the event loop. Bridge them, or the
+        # progress lines are silently dropped as un-awaited coroutines.
+        loop = asyncio.get_running_loop()
+
+        def sync_progress(text: str) -> None:
+            asyncio.run_coroutine_threadsafe(progress(text), loop)
+
+        session = new_session()
+        try:
+            summary = await asyncio.to_thread(run_backfill, session, filter_key,
+                                              limit, sync_progress)
+            return (f"processed {summary['processed']}, "
+                    f"websites +{summary['websites_found']}, "
+                    f"emails +{summary['emails_found']}, "
+                    f"socials +{summary['socials_found']}, "
+                    f"failed {summary['failed']}")
+        finally:
+            session.close()
+
+    job_id = start_job(f"backfill: {FILTERS[filter_key]}", factory)
+    return _back(f"Re-running discovery over up to {limit} prospects "
+                 f"({FILTERS[filter_key]}). Paced, so give it time.", job_id)
 
 
 @router.post("/queue")
@@ -157,7 +200,7 @@ async def action_golive_request():
     settings = get_settings()
     if settings.engine_mode.upper() != "LIVE":
         return _back("ENGINE_MODE is not LIVE. Set ENGINE_MODE=LIVE in .env and "
-                     "restart first — mode is never settable from the web UI.")
+                     "restart first. Mode is never settable from the web UI.")
 
     from bot.notify import notify
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Prospector — Growth Engine{% endblock %}
+{% block title %}Prospector · Growth Engine{% endblock %}
 {% block content %}
 <h1 class="text-lg font-semibold mb-1">Admin · Prospector</h1>
 <div class="ink-m text-xs mb-4">Where new prospects come from and the code-level filters applied before anything enters the funnel.</div>
@@ -11,9 +11,18 @@
       <label class="ink-2">Provider</label>
       <select name="provider">
         {% for p in providers %}
-        <option value="{{ p }}" {% if provider == p %}selected{% endif %}>{{ p }}</option>
+        <option value="{{ p }}" {% if provider == p %}selected{% endif %}>
+          {{ p }}{% if availability.get(p) %} (unavailable: {{ availability[p] }}){% endif %}</option>
         {% endfor %}
       </select>
+    </div>
+    <div class="flex justify-between items-start gap-2">
+      <label class="ink-2">Require a website<br>
+        <span class="ink-m text-xs">Off keeps businesses with no site as
+        &ldquo;no website&rdquo; leads. They are never auto-emailed unless a
+        verified address is found.</span></label>
+      <input type="checkbox" name="require_website" value="1"
+             {% if require_website %}checked{% endif %} class="mt-1">
     </div>
     <div class="flex justify-between items-center gap-2">
       <label class="ink-2">Registry state (license registry provider)</label>

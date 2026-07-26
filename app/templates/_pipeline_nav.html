@@ -8,8 +8,16 @@
       <span class="badge ml-1">{{ counts[s] }}</span>
     </a>
     {% endfor %}
+    <a href="/pipeline/runs" class="btn text-xs ink-2"
+       style="background: {{ 'var(--surface-1)' if not stage else 'var(--page)' }}">Runs &amp; rejects</a>
   </div>
-  <form method="get" action="/pipeline/search" class="text-sm">
-    <input name="q" value="{{ q }}" placeholder="Search all stages" class="w-56">
-  </form>
+  <div class="flex items-center gap-2">
+    {% if stage or q is defined %}
+    <a class="btn text-xs ink-2" style="background: var(--page)"
+       href="/pipeline/export/{{ (stage or 'search') }}.csv?q={{ q or '' }}&amp;segment={{ segment or '' }}">Export CSV</a>
+    {% endif %}
+    <form method="get" action="/pipeline/search" class="text-sm">
+      <input name="q" value="{{ q }}" placeholder="Search all stages" class="w-56">
+    </form>
+  </div>
 </div>

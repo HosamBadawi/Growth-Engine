@@ -1,4 +1,4 @@
-"""Module 2 — Enricher: crawl the prospect's website for contacts and intel.
+"""Enricher (module 2): crawl the prospect's website for contacts and intel.
 
 Hand-rolled httpx + BeautifulSoup crawler (research verdict: nothing on PyPI
 beats ~200 lines of controlled code for homepage + /contact + /about).
@@ -118,61 +118,130 @@ def _page_text(html: str) -> str:
     return re.sub(r"\s+", " ", soup.get_text(" ")).strip()
 
 
-def enrich_prospect(session: Session, prospect: Prospect, polite_delay: float = 2.0) -> dict:
-    """Crawl website, update prospect in place. Returns the intel found."""
+def outreach_channel(prospect: Prospect) -> str:
+    """How this prospect can actually be reached, most automatable first.
+
+    'email'  -> the engine can send automatically (if verified)
+    'form'   -> a human submits their contact form
+    'phone'  -> a human calls
+    'social' -> a human messages them; the engine NEVER does (see discovery.py)
+    'none'   -> no channel found
+    """
+    if prospect.email:
+        return "email"
+    if prospect.contact_form_url:
+        return "form"
+    if prospect.phone:
+        return "phone"
+    if prospect.social_links:
+        return "social"
+    return "none"
+
+
+def _apply_discovery(prospect: Prospect, found) -> None:
+    """Persist ladder output, never downgrading a higher-confidence value."""
+    from engine.discovery import is_aggregator, is_parked
+
+    existing = dict(prospect.provenance or {})
+
+    # Clear a stored directory/parked URL when the ladder could not confirm a
+    # real site. Rows saved before the aggregator gate existed still carry these,
+    # and a directory URL is worse than none: the crawler mines it for emails and
+    # can hand the sender a stranger's address.
+    if prospect.website and not found.website and (
+            is_aggregator(prospect.website) or is_parked(prospect.website)):
+        listing = prospect.website
+        prospect.website = None
+        existing.pop("website", None)
+        intel = dict(prospect.intel_json or {})
+        intel["demoted_listing"] = listing
+        prospect.intel_json = intel
+        log.info("%s: cleared directory URL %s (not a real website)",
+                 prospect.name, listing)
+
+    def better(field_name: str, confidence: float) -> bool:
+        return confidence >= float((existing.get(field_name) or {}).get("confidence", 0))
+
+    for field_name, value in (("website", found.website), ("phone", found.phone),
+                              ("contact_form_url", found.contact_form_url)):
+        note = found.provenance.get(field_name)
+        if value and note and better(field_name, note["confidence"]):
+            setattr(prospect, field_name, value)
+            existing[field_name] = note
+    if found.emails:
+        note = found.provenance.get("emails")
+        if not prospect.email or (note and better("emails", note["confidence"])):
+            prospect.email = found.emails[0]
+            if note:
+                existing["emails"] = note
+    if found.social_links:
+        merged = dict(prospect.social_links or {})
+        for platform, url in found.social_links.items():
+            merged.setdefault(platform, url)
+            key = f"social.{platform}"
+            if key in found.provenance:
+                existing.setdefault(key, found.provenance[key])
+        prospect.social_links = merged
+    if found.country and not prospect.country:
+        prospect.country = found.country
+    prospect.provenance = existing
+    prospect.discovery_partial = bool(found.partial)
+
+
+def enrich_prospect(session: Session, prospect: Prospect, polite_delay: float = 2.0,
+                    budget=None, progress=None, index: int = 0) -> dict:
+    """Climb the discovery ladder, then extract intel from whatever it fetched.
+
+    v2.2: contact discovery moved to engine/discovery.py so the enricher, the
+    providers and the backfill all use the SAME rungs and the same provenance.
+    A prospect with no website is no longer a dead end: the ladder may still
+    find one (rungs B/C/E) or return a social/phone channel instead.
+    """
+    from engine.discovery import (DiscoveryBudget, DiscoveryInput,
+                                  discover_contacts, rank_emails)
+
     intel = dict(prospect.intel_json or {})
+    budget = budget or DiscoveryBudget()
     website = prospect.website or ""
-    if not website.startswith("http"):
+    if website and not website.startswith("http"):
         website = "https://" + website
 
-    headers = {"User-Agent": USER_AGENT}
-    pages: dict[str, str] = {}
-    with httpx.Client(timeout=TIMEOUT, headers=headers) as client:
-        robots = _load_robots(client, website)
+    with httpx.Client(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT},
+                      follow_redirects=True) as client:
+        found = discover_contacts(
+            client,
+            DiscoveryInput(
+                name=prospect.name, city=prospect.city or "",
+                state=prospect.state or "", country=prospect.country or "",
+                niche=prospect.trade or "", website=website,
+                phone=prospect.phone or "",
+                emails=[prospect.email] if prospect.email else [],
+                key=prospect.dedupe_key or "",
+            ),
+            budget=budget, progress=progress, index=index,
+        )
 
-        def allowed(url: str) -> bool:
-            if robots is None:
-                return True
-            try:
-                return robots.can_fetch(USER_AGENT, url)
-            except Exception:
-                return True
+    _apply_discovery(prospect, found)
+    pages = found.pages
+    if not pages:
+        intel["enrich_error"] = ("no reachable website"
+                                 if not found.website else "homepage unreachable")
+        intel["discovery_rungs"] = found.rungs
+        intel["listings"] = found.listings
+        prospect.intel_json = intel
+        prospect.status = ProspectStatus.ENRICHED
+        session.commit()
+        log_event(session, "enricher",
+                  f"{prospect.name}: no page content "
+                  f"(rungs {'/'.join(found.rungs)}, channel {outreach_channel(prospect)})",
+                  level="WARNING")
+        return intel
 
-        home_html = _fetch(client, website) if allowed(website) else None
-        if home_html is None:
-            intel["enrich_error"] = "homepage unreachable"
-            prospect.intel_json = intel
-            prospect.status = ProspectStatus.ENRICHED
-            session.commit()
-            log_event(session, "enricher", f"{prospect.name}: homepage unreachable", level="WARNING")
-            return intel
-        pages[website] = home_html
-
-        base_host = urlparse(website).netloc
-        soup = BeautifulSoup(home_html, "lxml")
-        candidates: list[str] = []
-        for a in soup.find_all("a", href=True):
-            href = urljoin(website, a["href"])
-            parsed = urlparse(href)
-            if parsed.netloc != base_host:
-                continue
-            if CONTACT_LINK_RE.search(parsed.path) and href not in candidates:
-                candidates.append(href)
-        for url in candidates[:MAX_EXTRA_PAGES]:
-            if not allowed(url):
-                continue
-            time.sleep(polite_delay / 2)
-            html = _fetch(client, url)
-            if html:
-                pages[url] = html
-
+    website = found.website or website
     all_html = "\n".join(pages.values())
     all_html_lower = all_html.lower()
-
-    emails = extract_emails(all_html)
-    best = pick_best_email(emails, website)
-    if best and not prospect.email:
-        prospect.email = best
+    emails = found.emails or extract_emails(all_html)
+    best = prospect.email or (rank_emails(emails, website)[0] if emails else None)
 
     about_pages = [u for u in pages if re.search(r"about|story|team|meet", u, re.I)]
     about_text = ""
@@ -186,25 +255,7 @@ def enrich_prospect(session: Session, prospect: Prospect, polite_delay: float = 
     if owner_match and not prospect.owner_name:
         prospect.owner_name = owner_match.group(1)
 
-    contact_form_url = None
-    for url, html in pages.items():
-        if re.search(r"contact", url, re.I):
-            psoup = BeautifulSoup(html, "lxml")
-            form = psoup.find("form")
-            if form and (form.find("textarea") or form.find("input", {"type": "email"})):
-                contact_form_url = url
-                break
-    if not contact_form_url:
-        home_soup = BeautifulSoup(home_html, "lxml")
-        form = home_soup.find("form")
-        if form and form.find("textarea"):
-            contact_form_url = website
-    if contact_form_url:
-        prospect.contact_form_url = contact_form_url
-
-    socials = {}
-    for m in re.finditer(r'https?://(?:www\.)?(facebook|instagram)\.com/[^\s"\'<>)]+', all_html, re.I):
-        socials.setdefault(m.group(1).lower(), m.group(0))
+    socials = dict(prospect.social_links or {})
 
     years_in_business = None
     since = YEARS_SINCE_RE.search(about_text) or YEARS_SINCE_RE.search(all_html[:20000])
@@ -227,6 +278,8 @@ def enrich_prospect(session: Session, prospect: Prospect, polite_delay: float = 
             "years_in_business": years_in_business,
             "about_text": about_text,
             "pages_crawled": list(pages),
+            "discovery_rungs": found.rungs,
+            "listings": found.listings,
         }
     )
     prospect.intel_json = intel

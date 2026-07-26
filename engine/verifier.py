@@ -1,4 +1,4 @@
-"""Module 3 — Verifier: no email is queued without verification.
+"""Module 3, Verifier: no email is queued without verification.
 
 Pipeline: syntax (email-validator) -> MX (dnspython) -> optional SMTP RCPT probe
 on port 25 with graceful degradation (many networks block 25).
