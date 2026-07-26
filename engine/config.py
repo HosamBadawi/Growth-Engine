@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     postal_address: str = "Example Co | your postal address here"
 
     prospect_provider: str = "registry"
+    # Google Places API (optional, off by default): the supported, ToS-compliant
+    # way to get Google's business data. Requires a key; capped per day because
+    # every call costs money.
+    places_api_key: str = ""
+    places_daily_call_cap: int = 200
     registry_default_state: str = "FL"
     registry_discover_websites: bool = True
     gosom_binary: str = "bin/google-maps-scraper.exe"

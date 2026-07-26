@@ -17,7 +17,11 @@ log = logging.getLogger("prospector.csv")
 class CsvProvider(ProspectProvider):
     name = "csv"
 
-    def search(self, query: str, limit: int) -> list[RawProspect]:
+    def search(self, query: str, limit: int,
+               exclude_keys: set[str] | None = None,
+               progress=None) -> list[RawProspect]:
+        # exclude_keys ignored: a CSV is an explicit, operator-curated list and
+        # the prospector's _is_duplicate() still rejects anything already known.
         path = Path(query.removeprefix("csv:").strip())
         if not path.exists():
             raise FileNotFoundError(f"CSV file not found: {path}")

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Search — Growth Engine{% endblock %}
+{% block content %}
+{% include "_pipeline_nav.html" %}
+
+<div class="ink-m text-xs mb-3">{{ rows | length }} matches for "{{ q }}" across all stages</div>
+<div class="card overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead><tr class="text-left text-xs">
+      <th class="px-4 py-3">Name</th><th class="px-2 py-3">Stage</th>
+      <th class="px-2 py-3">Trade / City</th><th class="px-2 py-3">Contact</th>
+    </tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr class="row">
+        <td class="px-4 py-2.5 font-medium"><a href="/leads/{{ row.p.id }}">{{ row.p.name }}</a></td>
+        <td class="px-2 py-2.5"><a href="/pipeline/{{ row.stage }}" class="badge">{{ row.stage_label }}</a></td>
+        <td class="px-2 py-2.5 ink-2">{{ row.p.trade or '' }} · {{ (row.p.city or '') | title }}</td>
+        <td class="px-2 py-2.5 ink-2">{{ row.p.email or row.p.phone or '' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="px-4 py-8 text-center ink-m">No matches.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

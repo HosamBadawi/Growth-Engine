@@ -3,8 +3,18 @@ import pytest
 
 from engine.providers import registry
 from engine.providers.registry import (STATE_SOURCES, _first_allowed,
-                                       _rows_for_trade, _title_case_business,
+                                       _iter_rows_for_trade, _title_case_business,
                                        _title_case_owner, parse_registry_query)
+
+
+def _rows_for_trade(source, trade, city, limit=10):
+    """Compat shim for these tests: collect up to limit from the lazy iterator."""
+    out = []
+    for raw in _iter_rows_for_trade(source, trade, city, seen=set()):
+        out.append(raw)
+        if len(out) >= limit:
+            break
+    return out
 
 FIXTURE_ROWS = [
     # board, prefix, owner, business, x, addr, x, x, city, state, zip, county,

@@ -89,6 +89,9 @@ class Prospect(Base):
     rating: Mapped[Optional[float]] = mapped_column(Float)
     review_count: Mapped[Optional[int]] = mapped_column(Integer)
     owner_name: Mapped[Optional[str]] = mapped_column(String(255))
+    # Cheap provider-side identity (license no, else name|city) so a /find run
+    # can exclude already-known businesses BEFORE paying for website discovery.
+    dedupe_key: Mapped[Optional[str]] = mapped_column(String(320), index=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), index=True)
     email_verification_level: Mapped[str] = mapped_column(
         String(20), default=VerificationLevel.NONE

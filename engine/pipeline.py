@@ -28,20 +28,38 @@ async def _report(cb: ProgressCb | None, text: str) -> None:
 
 
 async def run_find(trade: str, city: str, limit: int,
-                   progress: ProgressCb | None = None) -> dict:
+                   progress: ProgressCb | None = None,
+                   provider_name: str | None = None) -> dict:
     """Full find pipeline. Returns summary counts."""
     session = new_session()
     try:
         query = trade if trade.startswith("csv:") else None
         await _report(progress, f"Prospecting '{trade} {city}' (target {limit})...")
+
+        # Bridge the provider's sync progress calls onto the async callback.
+        loop = asyncio.get_running_loop()
+
+        def sync_progress(text: str) -> None:
+            asyncio.run_coroutine_threadsafe(_report(progress, text), loop)
+
         summary = await asyncio.to_thread(
-            run_prospecting, session, trade, city, limit, query
+            run_prospecting, session, trade, city, limit, query,
+            provider_name, sync_progress,
         )
         await _report(
             progress,
             f"Prospector: found {summary['found']}, kept {summary['kept']}, "
-            f"duplicates {summary['duplicates']}, filtered {sum(summary['skipped'].values())}",
+            f"duplicates {summary['duplicates']}, "
+            f"skipped known {summary.get('skipped_known', 0)}, "
+            f"filtered {sum(summary['skipped'].values())}",
         )
+        if summary.get("exhausted") and summary["kept"] < limit:
+            known = summary.get("skipped_known", 0)
+            await _report(
+                progress,
+                f"{city.title()} {trade} exhausted: {known} of {known + summary['kept']} "
+                f"already known. Try another city or trade.",
+            )
 
         new_prospects = session.execute(
             select(Prospect).where(Prospect.status == ProspectStatus.NEW)

@@ -1,0 +1,15 @@
+<div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+  <div class="flex flex-wrap gap-1.5 text-sm">
+    {% for s in ['prospects', 'drafts', 'in_sequence', 'replies', 'closed'] %}
+    <a href="/pipeline/{{ s }}"
+       class="btn text-xs {% if stage == s %}font-semibold{% else %}ink-2{% endif %}"
+       style="background: {{ 'var(--surface-1)' if stage == s else 'var(--page)' }}">
+      {{ labels[s] }}
+      <span class="badge ml-1">{{ counts[s] }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  <form method="get" action="/pipeline/search" class="text-sm">
+    <input name="q" value="{{ q }}" placeholder="Search all stages" class="w-56">
+  </form>
+</div>

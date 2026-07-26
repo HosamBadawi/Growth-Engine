@@ -72,8 +72,9 @@ async def overview(request: Request):
     try:
         stats = compute_stats(session)
         series = per_day_series(session, days=30)
+        # Labels match the pipeline page names so the vocabulary is consistent.
         funnel = {
-            "labels": ["Found", "Verified", "Sent", "Replied", "Interested"],
+            "labels": ["Prospects", "Verified", "In Sequence", "Replies", "Closed won"],
             "values": [stats["prospects_found"], stats["verified"], stats["contacted"],
                        stats["replied"], stats["interested"] + stats["calls_booked"]],
         }
@@ -89,6 +90,15 @@ async def overview(request: Request):
 @router.get("/leads", dependencies=[Depends(require_auth)])
 async def leads(request: Request, status: str = "", trade: str = "", city: str = "",
                 verification: str = "", q: str = ""):
+    # The flat Leads table is superseded by the pipeline-stage pages; the old
+    # URL redirects (search goes to the global cross-stage search).
+    if q:
+        return RedirectResponse(f"/pipeline/search?q={q}", status_code=303)
+    return RedirectResponse("/pipeline", status_code=303)
+
+
+async def _legacy_leads_table(request: Request, status: str = "", trade: str = "",
+                              city: str = "", verification: str = "", q: str = ""):
     session = new_session()
     try:
         stmt = select(Prospect).order_by(Prospect.created_at.desc())
