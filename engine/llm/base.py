@@ -95,12 +95,20 @@ class LLMProvider(ABC):
                 return data
             except (json.JSONDecodeError, ValueError) as exc:
                 last_err = str(exc)
-                log.warning("%s: invalid JSON from %s (attempt %d/%d): %s",
-                            self.label, model, attempt, max_attempts, exc)
+                # The raw output is the diagnosis: "missing keys: ['body']"
+                # without what the model actually said is undiagnosable.
+                log.warning("%s: invalid JSON from %s (attempt %d/%d): %s; "
+                            "raw output: %r",
+                            self.label, model, attempt, max_attempts, exc,
+                            (raw or "")[:400])
+                # Retry SHORTER, not longer: appending the error to the full
+                # prompt made every retry bigger than the attempt that just
+                # failed. The corrective goes first, the task is truncated.
                 prompt = (
-                    f"{user}\n\nYour previous output was invalid ({last_err}). "
-                    f"Reply with ONLY a valid JSON object containing keys: "
-                    f"{required_keys}."
+                    f"Reply with ONLY a valid JSON object containing keys "
+                    f"{required_keys}, nothing else. Your previous reply was "
+                    f"invalid ({last_err[:200]}).\n\nThe task, unchanged:\n"
+                    f"{user[:1600]}"
                 )
         raise LLMError(f"{self.label}: model {model} failed to produce valid JSON "
                        f"after {max_attempts} attempts: {last_err}")

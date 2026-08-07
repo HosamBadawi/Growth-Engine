@@ -143,10 +143,13 @@ async def generate_all_drafts(progress: ProgressCb | None = None) -> list[int]:
     Returns the new touch ids (fetch fresh in the caller's session)."""
     from engine.campaign import assert_campaign_ready
     from engine.config import get_settings
+    from engine.researcher import reset_detail_memory
 
     # In SANDBOX/LIVE a placeholder campaign stops the whole run with one clear
     # error instead of 50 identical per-prospect failures. DRY_RUN warns once.
     assert_campaign_ready(get_settings().engine_mode)
+    # The cross-prospect repetition memory is per run by design.
+    reset_detail_memory()
 
     session = new_session()
     try:
@@ -178,7 +181,23 @@ async def generate_all_drafts(progress: ProgressCb | None = None) -> list[int]:
 
         await _report(progress, f"Drafting for {len(todo)} verified prospects...")
         touch_ids = []
+        seen_owner_names: dict[str, int] = {}
         for prospect in todo:
+            # Owner-name integrity: the same person cannot own every company in
+            # the batch. On a collision the SECOND prospect loses the name (it
+            # moves to intel_json for the record) and greets "Hi there" instead.
+            owner_key = (prospect.owner_name or "").strip().lower()
+            if owner_key:
+                first_id = seen_owner_names.setdefault(owner_key, prospect.id)
+                if first_id != prospect.id:
+                    intel = dict(prospect.intel_json or {})
+                    intel["suppressed_owner_name"] = prospect.owner_name
+                    prospect.intel_json = intel
+                    prospect.owner_name = None
+                    session.commit()
+                    await _report(progress,
+                                  f"owner name '{intel['suppressed_owner_name']}' "
+                                  f"already used this run, blanked on {prospect.name}")
             try:
                 touch = await generate_draft(session, prospect)
                 if touch is None:

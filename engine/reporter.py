@@ -6,8 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bot.notify import notify
-from db.models import (Prospect, ProspectStatus, Reply, ReplyClass, Touch,
-                       TouchStatus, VerificationLevel)
+from db.models import (Event, Prospect, ProspectStatus, Reply, ReplyClass,
+                       Touch, TouchStatus, VerificationLevel)
 from engine.config import get_settings
 from engine.state import is_paused
 from engine.util import utcnow
@@ -40,6 +40,16 @@ def compute_stats(session: Session) -> dict:
         ).all()
     )
 
+    # v2.4: the verify rate must be explainable, not just a number. Reasons
+    # live in intel_json (JSON column), so the breakdown is computed in Python.
+    reject_breakdown: dict[str, int] = {}
+    for intel in session.execute(
+        select(Prospect.intel_json).where(
+            Prospect.email_verification_level == VerificationLevel.FAILED)
+    ).scalars().all():
+        key = (intel or {}).get("reject_reason") or "other"
+        reject_breakdown[key] = reject_breakdown.get(key, 0) + 1
+
     return {
         "prospects_found": count(select(func.count(Prospect.id))),
         "found_today": count(select(func.count(Prospect.id))
@@ -56,6 +66,13 @@ def compute_stats(session: Session) -> dict:
                              .where(Prospect.status == ProspectStatus.VERIFIED,
                                     Prospect.owner_name.isnot(None),
                                     Prospect.owner_name != "")),
+        "verify_rejects": reject_breakdown,
+        # A silently degrading run must be visible: fallback events are logged
+        # with a fixed prefix exactly so this count can exist.
+        "llm_fallbacks_today": count(
+            select(func.count(Event.id)).where(
+                Event.module == "llm", Event.ts >= day_ago,
+                Event.message.like("LLM fallback:%"))),
         "form_only": count(select(func.count(Prospect.id))
                            .where(Prospect.status == ProspectStatus.FORM_ONLY)),
         "drafts_pending": count(select(func.count(Touch.id))
@@ -120,6 +137,14 @@ def build_report_text(session: Session) -> str:
     ) or "    none yet"
     coverage = (round(100 * s["owner_named"] / s["verified_stage"])
                 if s["verified_stage"] else 0)
+    rejects = s["verify_rejects"]
+    reject_line = ""
+    if rejects:
+        parts = ", ".join(f"{k}: {v}" for k, v in
+                          sorted(rejects.items(), key=lambda kv: -kv[1]))
+        reject_line = f"Rejected addresses: {sum(rejects.values())} ({parts})\n"
+    fallback_line = (f"LLM fallbacks today: {s['llm_fallbacks_today']}\n"
+                     if s["llm_fallbacks_today"] else "")
     return (
         f"Growth Engine daily report [{s['mode']}]"
         f"{' *** PAUSED ***' if s['paused'] else ''}\n"
@@ -127,6 +152,7 @@ def build_report_text(session: Session) -> str:
         f"Enriched: {s['enriched']} | Verified: {s['verified']} | Form only: {s['form_only']}\n"
         f"Owner names: {s['owner_named']} of {s['verified_stage']} awaiting draft "
         f"({coverage}%)\n"
+        f"{reject_line}{fallback_line}"
         f"Drafts awaiting approval: {s['drafts_pending']} | Approved: {s['approved']} "
         f"| Queued: {s['queued']}\n"
         f"Sent today: {s['sent_today']} | Total sent: {s['total_sent']}\n"

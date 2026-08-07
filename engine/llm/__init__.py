@@ -153,29 +153,54 @@ def _record_usage(session: Session, provider: LLMProvider, model: str,
     session.commit()
 
 
+async def resolve_role_chain(role: str, session: Session) -> list[tuple[LLMProvider, str]]:
+    """Ordered (provider, model) candidates for a role.
+
+    v2.4: the old fallback was "cloud fails, use local", a no-op for an
+    operator already on local Ollama with an assigned model: it retried the
+    exact model that just failed. The chain is the role's assignment followed
+    by the env default, deduped, so an assigned model that fails hands over to
+    a genuinely different candidate. A role with a single distinct candidate
+    behaves exactly as before."""
+    primary = await resolve_role(role, session)
+    chain = [primary]
+    local = (_local_ollama(), _env_model_for(role))
+
+    def key(candidate: tuple[LLMProvider, str]) -> tuple[str, str, str]:
+        provider, model = candidate
+        return (provider.provider_type, provider.base_url, model)
+
+    if key(local) != key(primary):
+        chain.append(local)
+    return chain
+
+
 async def _call_with_fallback(role: str, method: str, **kwargs):
-    """Resolve, call, record usage; on API-provider failure retry once locally."""
+    """Try each candidate in the role's chain; every hand-over is an EVENT so a
+    silently degrading run shows up in /report, not just in a log file."""
     from db.session import new_session
 
     session = new_session()
     try:
-        provider, model = await resolve_role(role, session)
-        try:
-            result = await getattr(provider, method)(model, **kwargs)
-            _record_usage(session, provider, model, role)
-            return result
-        except LLMError:
-            if provider.provider_type == "ollama":
-                raise
-            from engine.events import log_event
+        chain = await resolve_role_chain(role, session)
+        last_exc: LLMError | None = None
+        for index, (provider, model) in enumerate(chain):
+            try:
+                result = await getattr(provider, method)(model, **kwargs)
+                _record_usage(session, provider, model, role)
+                return result
+            except LLMError as exc:
+                last_exc = exc
+                if index + 1 < len(chain):
+                    from engine.events import log_event
 
-            log_event(session, "llm",
-                      f"Provider '{provider.label}' failed for role {role}, "
-                      f"falling back to local Ollama", level="WARNING")
-            fallback, fb_model = _local_ollama(), _env_model_for(role)
-            result = await getattr(fallback, method)(fb_model, **kwargs)
-            _record_usage(session, fallback, fb_model, role)
-            return result
+                    next_provider, next_model = chain[index + 1]
+                    log_event(session, "llm",
+                              f"LLM fallback: '{provider.label}' model {model} "
+                              f"failed for role {role} ({str(exc)[:150]}), "
+                              f"trying '{next_provider.label}' model {next_model}",
+                              level="WARNING")
+        raise last_exc
     finally:
         session.close()
 

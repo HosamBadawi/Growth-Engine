@@ -43,7 +43,7 @@ def read_template_source(name: str) -> tuple[str, bool]:
 
 
 def save_template_override(name: str, source: str) -> None:
-    if name not in set(SEQUENCE_TEMPLATES.values()) | {"footer.j2"}:
+    if name not in EDITABLE_TEMPLATES:
         raise ValueError(f"Unknown template '{name}'")
     OVERRIDE_DIR.mkdir(parents=True, exist_ok=True)
     (OVERRIDE_DIR / name).write_text(source, encoding="utf-8")
@@ -64,6 +64,52 @@ SEQUENCE_TEMPLATES = {
     TouchType.FOLLOWUP_3: "followup_day6.j2",
     TouchType.BREAKUP: "breakup_day10.j2",
 }
+
+# v2.4: three structurally different first emails, selected deterministically,
+# because eleven byte-identical template fallbacks in one batch is a bulk-mail
+# fingerprint that filters cluster on.
+INITIAL_TEMPLATES = ["initial.j2", "initial_b.j2", "initial_c.j2"]
+
+EDITABLE_TEMPLATES = (list(SEQUENCE_TEMPLATES.values())
+                      + ["initial_b.j2", "initial_c.j2", "footer.j2"])
+
+
+def initial_template_for(prospect: Prospect) -> str:
+    return INITIAL_TEMPLATES[(prospect.id or 0) % len(INITIAL_TEMPLATES)]
+
+
+# Trades are stored lowercase for matching; prose needs the display form.
+# "researching Tampa hvac companies" reads like a bot wrote it.
+TRADE_DISPLAY = {
+    "hvac": "HVAC", "plumber": "plumbing", "plumbing": "plumbing",
+    "electrician": "electrical", "electrical": "electrical",
+    "roofer": "roofing", "roofing": "roofing", "landscaper": "landscaping",
+}
+
+
+def _clean_company(name: str) -> str:
+    """Normalise missing spaces after commas: 'Southland Services,llc'."""
+    return re.sub(r",(?=\S)", ", ", (name or "").strip())
+
+
+_COMPANY_SUFFIXES = {"llc": "LLC", "inc": "Inc", "co": "Co", "corp": "Corp",
+                     "ltd": "Ltd", "pa": "PA", "pc": "PC"}
+
+
+def _subject_company(name: str) -> str:
+    """Title-cased company for the subject line only; the body keeps the
+    legal name. Existing capitals (HVAC, McDonald) are left alone, legal
+    suffixes get their conventional casing."""
+    words = []
+    for word in _clean_company(name).split():
+        key = word.strip(".,").lower()
+        if key in _COMPANY_SUFFIXES:
+            words.append(word.replace(word.strip(".,"), _COMPANY_SUFFIXES[key]))
+        elif word.islower():
+            words.append(word.capitalize())
+        else:
+            words.append(word)
+    return " ".join(words)
 
 GENERIC_NAME_WORDS = {
     "hvac", "plumbing", "plumber", "plumbers", "heating", "cooling", "air",
@@ -112,9 +158,42 @@ def campaign_for(prospect: Prospect):
     return campaign_for_segment(segment)
 
 
+def greeting_first_name(prospect: Prospect) -> str:
+    """The first name the greeting may safely use.
+
+    'Hi there' is fine; 'Hi Kenneth' to someone called Lindsay is not. When the
+    email local part looks personal and shares nothing with the owner name
+    (fgolden@... vs 'Lindsay W Byers'), the mailbox belongs to someone else,
+    so the greeting falls back rather than asserting a wrong name."""
+    owner = (prospect.owner_name or "").strip()
+    if not owner:
+        return "there"
+    local = (prospect.email or "").split("@")[0].lower()
+    local_alpha = re.sub(r"[^a-z]", "", local)
+    if local_alpha and local not in _ROLE_LOCALS:
+        parts = [p for p in re.findall(r"[a-z]+", owner.lower()) if len(p) > 1]
+        variants = set(parts)
+        if parts:
+            variants.add(parts[0][0] + parts[-1])   # lbyers
+            variants.add(parts[0] + parts[-1][0])   # lindsayb
+        overlap = any(v in local_alpha for v in variants) or (
+            # ken@ belongs to Kenneth: a short local that prefixes a name part.
+            len(local_alpha) >= 3
+            and any(p.startswith(local_alpha) for p in parts))
+        if not overlap:
+            return "there"
+    return owner.split()[0]
+
+
+_ROLE_LOCALS = {
+    "info", "office", "contact", "admin", "sales", "support", "hello",
+    "service", "team", "mail", "help", "dispatch", "scheduling",
+}
+
+
 def template_context(prospect: Prospect, card: dict | None = None) -> dict:
     campaign = campaign_for(prospect)
-    first_name = prospect.owner_name.split()[0] if prospect.owner_name else "there"
+    first_name = greeting_first_name(prospect)
     job_value = campaign.job_value_for(prospect.trade)
     weekly_loss = campaign.missed_calls_per_week * job_value
     detail = ""
@@ -132,11 +211,12 @@ def template_context(prospect: Prospect, card: dict | None = None) -> dict:
             detail = f"your {prospect.rating} star rating from {prospect.review_count} customers"
         else:
             detail = "your local reputation"
+    raw_trade = (prospect.trade or "home service").strip().lower()
     context = {
         "first_name": first_name,
-        "company": prospect.name,
+        "company": _clean_company(prospect.name),
         "city": (prospect.city or "your city").title(),
-        "trade": prospect.trade or "home service",
+        "trade": TRADE_DISPLAY.get(raw_trade, raw_trade),
         "personal_detail": detail,
         "job_value": job_value,
         "missed_calls_week": campaign.missed_calls_per_week,
@@ -151,8 +231,10 @@ def template_context(prospect: Prospect, card: dict | None = None) -> dict:
         "sender_company": campaign.company,
     }
     # Deterministic per-prospect subject: same prospect, same subject, always.
+    # The subject gets the title-cased company; the body keeps the legal name.
     context["subject_line"] = SUBJECT_PATTERNS[
-        (prospect.id or 0) % len(SUBJECT_PATTERNS)].format(**context)
+        (prospect.id or 0) % len(SUBJECT_PATTERNS)].format(
+        **{**context, "company": _subject_company(prospect.name)})
     return context
 
 
@@ -334,8 +416,21 @@ def check_style(subject: str, body: str, prospect: Prospect,
             "(company name, owner first name or city)"
         )
     if not body.strip().lower().startswith("hi "):
-        greeting = prospect.owner_name.split()[0] if prospect.owner_name else "there"
-        violations.append(f'must open with the greeting "Hi {greeting}," on its own line')
+        violations.append(f'must open with the greeting '
+                          f'"Hi {greeting_first_name(prospect)}," on its own line')
+
+    # Draft #34 shipped ending on "Should I send you the demo?" with no
+    # signature at all. The last non-empty line must be the signature.
+    signature_line = (campaign.signature or "").strip().splitlines()
+    signature_line = signature_line[0].strip() if signature_line else ""
+    if signature_line:
+        non_empty = [line.strip() for line in body.splitlines() if line.strip()]
+        last = non_empty[-1] if non_empty else ""
+        sender = (campaign.sender_name or "").strip()
+        if not (signature_line.lower() in last.lower()
+                or (sender and sender.lower() in last.lower())):
+            violations.append(
+                f'must end with the signature "{signature_line}" as the last line')
 
     violations.extend(_readability_violations(body, campaign.signature))
 
@@ -348,7 +443,7 @@ def check_style(subject: str, body: str, prospect: Prospect,
         # Subject rules apply to the first cold email; follow-ups thread as "re:".
         subject_words = len(subject.split())
         subject_lower = subject.lower()
-        name_lower = (prospect.name or "").lower()
+        name_lower = _clean_company(prospect.name or "").lower()
         city_lower = (prospect.city or "").lower()
         if not ((name_lower and name_lower in subject_lower)
                 or (city_lower and city_lower in subject_lower)):
@@ -375,8 +470,6 @@ def writer_system_prompt(prospect: Prospect | None = None) -> str:
 Hard style rules, every one is checked by a machine:
 - Under 150 words total in the body. Short sentences, real punctuation, at
   least 4 sentences in at least 3 paragraphs separated by blank lines.
-- Subject line: 8 words or fewer, must mention the company name or the city,
-  lowercase apart from proper nouns, no full stop at the end.
 - The FIRST line must reference the prospect's specific detail from the intel.
 - Include exactly one concrete money pain (a job value walking away).
 - Include the demo link exactly as given. Do NOT include any calendar or
@@ -384,10 +477,10 @@ Hard style rules, every one is checked by a machine:
 - End with one short question.
 - NEVER use any dash character (no -, --, em dash or en dash). Write "to" or use commas.
 - No emojis. Plain, human, conversational American English. No hype words.
-- Sign as: {campaign.signature}
-Reply with ONLY a JSON object: {{"subject": "...", "body": "..."}}. The body is
-plain text with real line breaks. Do not copy the template verbatim, adapt it
-to this specific prospect."""
+- Sign as: {campaign.signature} (this must be the last line of the body).
+Reply with ONLY a JSON object: {{"body": "..."}}. The body is plain text with
+real line breaks. Do not copy the template verbatim, adapt it to this specific
+prospect. The subject line is handled separately, do not write one."""
 
 
 async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
@@ -397,32 +490,45 @@ async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
     and no owner name was discovered."""
     from engine.campaign import assert_campaign_ready, get_campaign
 
+    from engine.targeting import targeting_block_reason
+
     settings = get_settings()
     assert_campaign_ready(settings.engine_mode)
     if settings.require_owner_name and not prospect.owner_name:
         log.info("Skipping %s: no owner name and REQUIRE_OWNER_NAME is on",
                  prospect.name)
         return None
+    # Backstop for the prospecting-time gate: enrichment can attach a foreign
+    # site or email long after prospecting let the row through.
+    block = targeting_block_reason(prospect.country, prospect.website,
+                                   prospect.email, prospect.trade)
+    if block:
+        log_event(session, "writer",
+                  f"{prospect.name}: not drafting, outside campaign target ({block})",
+                  level="WARNING")
+        return None
     card = await build_intel_card(session, prospect)
-    tpl_subject, tpl_body = render_email_template("initial.j2", prospect, card)
+    template_name = initial_template_for(prospect)
+    tpl_subject, tpl_body = render_email_template(template_name, prospect, card)
 
     campaign = get_campaign()
-    context = template_context(prospect, card)
-    subject_options = ", ".join(
-        f'"{pattern.format(**context)}"' for pattern in SUBJECT_PATTERNS)
+    greet = greeting_first_name(prospect)
     base_user = (
         f"Prospect:\n"
         f"- company: {prospect.name}\n"
         f"- trade: {prospect.trade}\n"
         f"- city: {(prospect.city or '').title()}, {prospect.state or ''}\n"
-        f"- owner first name: {prospect.owner_name or 'unknown, open with Hi there'}\n"
+        f"- owner first name: "
+        f"{greet if greet != 'there' else 'unknown, open with Hi there'}\n"
         f"- intel card: {card}\n"
         f"- average job value: ${campaign.job_value_for(prospect.trade)}\n"
         f"- demo link: {campaign.demo_url}\n\n"
-        f"Proven template to adapt (do not copy verbatim):\n---\n{tpl_body}\n---\n"
-        f"Subject line options, pick one and adapt it: {subject_options}"
+        f"Proven template to adapt (do not copy verbatim):\n---\n{tpl_body}\n---"
     )
 
+    # The subject never comes from the model: the deterministic pattern is
+    # already rendered into the template, and run data showed the model both
+    # omitting the body (burning every retry) and collapsing subject variety.
     subject, body, source = tpl_subject, tpl_body, "template"
     system_prompt = writer_system_prompt(prospect)
     user = base_user
@@ -430,13 +536,12 @@ async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
         for attempt in range(1, 4):
             data = await llm_chat_json(
                 "writer", system_prompt, user,
-                required_keys=["subject", "body"], max_attempts=2, temperature=0.6,
+                required_keys=["body"], max_attempts=2, temperature=0.35,
             )
-            cand_subject = str(data["subject"]).strip()
             cand_body = str(data["body"]).strip()
-            violations = check_style(cand_subject, cand_body, prospect)
+            violations = check_style(subject, cand_body, prospect)
             if not violations:
-                subject, body, source = cand_subject, cand_body, "llm"
+                body, source = cand_body, "llm"
                 break
             log.info("Draft for %s attempt %d violations: %s", prospect.name, attempt, violations)
             user = (
@@ -455,7 +560,7 @@ async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
         subject=subject,
         body=body,
         status=TouchStatus.DRAFT,
-        meta_json={"source": source},
+        meta_json={"source": source, "template": template_name},
     )
     session.add(touch)
     prospect.status = ProspectStatus.DRAFTED

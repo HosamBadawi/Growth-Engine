@@ -137,6 +137,25 @@ class Settings(BaseSettings):
     # stay VERIFIED instead of receiving a "Hi there" email.
     require_owner_name: bool = False
 
+    # v2.4 targeting gate: a Brazilian restaurant must never receive a US
+    # home-service pitch. Country checked against prospect.country and any
+    # ccTLD on the website/email; trades checked against TARGET_TRADES.
+    # Empty string disables the respective check (worldwide / any-niche runs).
+    target_country: str = "US"
+    target_trades: str = ""
+    # Local parts that can never be a business owner's inbox. info/office/
+    # service/contact/admin stay ALLOWED: for a four-truck business those are
+    # often the owner's own mailbox.
+    verifier_deny_localparts: str = (
+        "noreply,no-reply,donotreply,careers,jobs,recruiting,catering,"
+        "underwriting,billing,invoices,press,media,legal,abuse,postmaster,"
+        "webmaster"
+    )
+
+    @property
+    def target_trade_list(self) -> list[str]:
+        return [t.strip().lower() for t in self.target_trades.split(",") if t.strip()]
+
     @property
     def effective_researcher_model(self) -> str:
         return self.researcher_model or self.classifier_model

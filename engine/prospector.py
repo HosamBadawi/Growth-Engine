@@ -22,8 +22,18 @@ def known_dedupe_keys(session: Session) -> set[str]:
     return {k for k in rows if k}
 
 
-def _filter_reason(raw: RawProspect, require_website: bool = True) -> str | None:
+def _filter_reason(raw: RawProspect, require_website: bool = True,
+                   trade: str = "") -> str | None:
     from engine.prospector_settings import eff_franchise_keywords, eff_review_bounds
+    from engine.targeting import targeting_block_reason
+
+    # v2.4 geo/niche gate first: a Brazilian restaurant must never even enter
+    # a US home-service campaign, whatever its reviews look like.
+    block = targeting_block_reason(raw.country, raw.website,
+                                   raw.emails[0] if raw.emails else "",
+                                   raw.category or trade)
+    if block:
+        return block
 
     min_reviews, max_reviews = eff_review_bounds()
     if require_website and not raw.website:
@@ -126,7 +136,7 @@ def run_prospecting(
             if found_site:
                 raw.website = found_site
                 rescued += 1
-        reason = _filter_reason(raw, require_website)
+        reason = _filter_reason(raw, require_website, trade=trade)
         if reason:
             summary["skipped"][reason] = summary["skipped"].get(reason, 0) + 1
             log.info("Skipped '%s': %s", raw.name, reason)

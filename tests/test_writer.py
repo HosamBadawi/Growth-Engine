@@ -23,15 +23,17 @@ def test_template_context_uses_trade_value(prospect):
     assert ctx["yearly_loss"] == ctx["weekly_loss"] * 52
 
 
-def _valid_email1_body(prospect) -> str:
+def _valid_email1_body(prospect, extra: str = "") -> str:
+    from engine.campaign import get_campaign
+
     settings = get_settings()
     return (
         f"Hi Mike,\n\nI came across {prospect.name} while researching Tampa "
         f"plumber companies, and your 4.8 star rating stood out.\n\n"
         f"When a customer calls after hours, what happens to that call? For most "
         f"companies a $500 job walks away.\n\n"
-        f"60 second demo: {settings.demo_url}\n\nWorth a quick look?\n\n"
-        f"Best regards from the team"
+        f"60 second demo: {settings.demo_url}\n\nWorth a quick look?{extra}\n\n"
+        f"{get_campaign().signature}"
     )
 
 
@@ -41,7 +43,8 @@ def test_email1_forbids_calendar_link(prospect):
     subject = f"quick question for {prospect.name}"
     assert check_style(subject, body, prospect, TouchType.EMAIL_1) == []
 
-    body_with_cal = body + f"\nMy calendar: {settings.calendly_url}"
+    body_with_cal = _valid_email1_body(
+        prospect, extra=f"\nMy calendar: {settings.calendly_url}")
     violations = check_style(subject, body_with_cal, prospect, TouchType.EMAIL_1)
     assert any("must NOT contain the calendar link" in v for v in violations)
 
@@ -52,7 +55,8 @@ def test_followups_require_calendar_link(prospect):
     violations = check_style("re: quick question", body, prospect, TouchType.FOLLOWUP_2)
     assert any("missing the calendar link" in v for v in violations)
 
-    body_with_cal = body + f"\nMy calendar: {settings.calendly_url}"
+    body_with_cal = _valid_email1_body(
+        prospect, extra=f"\nMy calendar: {settings.calendly_url}")
     assert check_style("re: quick question", body_with_cal, prospect,
                        TouchType.FOLLOWUP_2) == []
 

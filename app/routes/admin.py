@@ -511,11 +511,12 @@ def _sample_prospect():
 
 @router.get("/templates")
 async def templates_page(request: Request, msg: str = "", name: str = "initial.j2"):
-    from engine.writer import (SEQUENCE_TEMPLATES, check_style,
-                               read_template_source, render_email_template,
-                               render_footer)
+    from engine.writer import (EDITABLE_TEMPLATES, SEQUENCE_TEMPLATES,
+                               check_style, read_template_source,
+                               render_email_template, render_footer)
+    from db.models import TouchType
 
-    editable = list(SEQUENCE_TEMPLATES.values()) + ["footer.j2"]
+    editable = list(EDITABLE_TEMPLATES)
     if name not in editable:
         name = "initial.j2"
     source, is_override = read_template_source(name)
@@ -524,7 +525,9 @@ async def templates_page(request: Request, msg: str = "", name: str = "initial.j
     violations: list[str] = []
     sample = _sample_prospect()
     if name != "footer.j2":
-        touch_type = {v: k for k, v in SEQUENCE_TEMPLATES.items()}[name]
+        # Every initial_* variant is an EMAIL_1 for link-discipline purposes.
+        touch_type = ({v: k for k, v in SEQUENCE_TEMPLATES.items()}.get(name)
+                      or TouchType.EMAIL_1)
         try:
             preview_subject, preview_body = render_email_template(name, sample)
             violations = check_style(preview_subject, preview_body, sample, touch_type)

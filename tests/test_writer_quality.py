@@ -15,6 +15,12 @@ from engine.config import get_settings
 from engine.writer import (SUBJECT_PATTERNS, check_style, render_email_template,
                            render_footer, template_context)
 
+
+def _sig() -> str:
+    from engine.campaign import get_campaign
+
+    return get_campaign().signature
+
 # The actual body a DRY_RUN QA pass found queued in /outbox. 58 words, one full
 # stop, zero structure. It satisfied every rule check_style had at the time.
 DEGENERATE = (
@@ -45,7 +51,7 @@ def test_overlong_sentence_is_named(prospect):
     long_sentence = "we " + "really " * 33 + "care about your calls."
     body = (f"Hi Mike,\n\nTampa Bay Plumbing Pros stood out to me.\n\n"
             f"{long_sentence}\n\nDemo here: {get_settings().demo_url}\n\n"
-            f"Worth a look? I can show you more.\n\nBest regards from the team")
+            f"Worth a look? I can show you more.\n\n{_sig()}")
     violations = check_style(f"quick question for {prospect.name}", body,
                              prospect, TouchType.EMAIL_1)
     assert any("keep every sentence under 32 words" in v for v in violations)
@@ -53,7 +59,7 @@ def test_overlong_sentence_is_named(prospect):
 
 def test_too_few_sentences_flagged(prospect):
     body = (f"Hi Mike,\n\nTampa Bay Plumbing Pros looked great.\n\n"
-            f"Demo: {get_settings().demo_url}\n\nWorth a look?\n\nBest regards")
+            f"Demo: {get_settings().demo_url}\n\nWorth a look?\n\n{_sig()}")
     violations = check_style(f"quick question for {prospect.name}", body,
                              prospect, TouchType.EMAIL_1)
     assert any("at least 4 short ones" in v for v in violations)
@@ -62,7 +68,7 @@ def test_too_few_sentences_flagged(prospect):
 def test_missing_terminal_punctuation_flagged(prospect):
     body = (f"Hi Mike,\n\nTampa Bay Plumbing Pros stood out to me today\n\n"
             f"What happens to missed calls? Most walk away. That is real money.\n\n"
-            f"Demo: {get_settings().demo_url}\n\nWorth a look?\n\nBest regards")
+            f"Demo: {get_settings().demo_url}\n\nWorth a look?\n\n{_sig()}")
     violations = check_style(f"quick question for {prospect.name}", body,
                              prospect, TouchType.EMAIL_1)
     assert any("must end with" in v for v in violations)
@@ -72,7 +78,7 @@ def test_repeated_phrase_flagged(prospect):
     phrase = "books the job onto your calendar"
     body = (f"Hi Mike,\n\nTampa Bay Plumbing Pros stood out, it {phrase} fast.\n\n"
             f"My system also {phrase} at night. It answers every call.\n\n"
-            f"Demo: {get_settings().demo_url}\n\nWorth a look?\n\nBest regards")
+            f"Demo: {get_settings().demo_url}\n\nWorth a look?\n\n{_sig()}")
     violations = check_style(f"quick question for {prospect.name}", body,
                              prospect, TouchType.EMAIL_1)
     assert any("appears more than once" in v for v in violations)
@@ -82,7 +88,7 @@ def test_two_links_in_email1_flagged(prospect):
     body = (f"Hi Mike,\n\nTampa Bay Plumbing Pros stood out to me.\n\n"
             f"See {get_settings().demo_url} and https://other.example/x today.\n\n"
             f"Calls walk away every week. That is money gone.\n\n"
-            f"Worth a look?\n\nBest regards from the team")
+            f"Worth a look?\n\n{_sig()}")
     violations = check_style(f"quick question for {prospect.name}", body,
                              prospect, TouchType.EMAIL_1)
     assert any("exactly one http link" in v for v in violations)

@@ -199,4 +199,11 @@ class WebResearcher(ResearchProvider):
             required_keys=["human_detail", "pain_signal", "bullets"],
         )
         card["source_urls"] = source_urls
+        # The grounding gate in build_intel_card verifies the proposed detail
+        # against exactly the text the model saw. Includes the prospect's own
+        # structured facts so "4.9 stars across 120 reviews" stays provable.
+        from engine.researcher import grounding_source
+
+        card["_source_text"] = (f"{web_text}\n{site_text}\n"
+                                + grounding_source(prospect))
         return card

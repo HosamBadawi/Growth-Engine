@@ -29,6 +29,121 @@ _SUPERLATIVE_RE = re.compile(
     r"\b(best|top rated|top-rated|leading|number one|no\.? ?1)\b", re.I
 )
 
+# ── v2.4 grounding: a detail the source cannot back does not exist ───────────
+# Real failures this gate answers: "prom dresses and bridal wear available" on
+# an HVAC company, "20 years serving San Diego" in a Tampa campaign, and the
+# same "20 years serving Tampa" asserted about eight unrelated businesses.
+
+_STOPWORDS = frozenset(
+    "a an and are as at be been but by can could did do does for from had has "
+    "have he her his how i if in into is it its just me more most my no not of "
+    "on one or our out she so some than that the their them then there they "
+    "this to up was we were what when where which who will with would you your "
+    "across about over under after before while also very really".split()
+)
+
+# Vocabulary that belongs to another industry entirely. A topic is skipped when
+# it appears in the prospect's own trade (a catering campaign may talk catering).
+_BANNED_TOPICS = ("bridal", "prom", "wedding", "pageant", "insurance",
+                  "underwriting", "legal defense", "attorney", "law firm",
+                  "catering", "real estate", "realtor", "mortgage")
+
+# Compact list of recognizable city names for the wrong-city check. Substring
+# scan over the lowercase detail; the prospect's own city is always allowed.
+_KNOWN_CITIES = (
+    "new york", "los angeles", "chicago", "houston", "phoenix", "philadelphia",
+    "san antonio", "san diego", "dallas", "san jose", "austin", "jacksonville",
+    "fort worth", "columbus", "charlotte", "san francisco", "indianapolis",
+    "seattle", "denver", "boston", "nashville", "detroit", "portland",
+    "las vegas", "memphis", "louisville", "baltimore", "milwaukee",
+    "albuquerque", "tucson", "sacramento", "kansas city", "atlanta", "miami",
+    "orlando", "tampa", "st petersburg", "new orleans", "cleveland",
+    "pittsburgh", "cincinnati", "minneapolis", "salt lake city", "san juan",
+    "toronto", "london", "rio de janeiro", "sao paulo", "mexico city",
+)
+
+_RECENT_DETAILS: dict[str, int] = {}  # normalized detail -> first prospect id
+_RECENT_MAX = 50
+
+
+def reset_detail_memory() -> None:
+    """Called at the start of a drafting run (and per test)."""
+    _RECENT_DETAILS.clear()
+
+
+def is_repeated_detail(detail: str, prospect_id: int | None) -> bool:
+    """True when this exact detail was already used for a DIFFERENT prospect
+    in the current run. "20 years serving Tampa" on eight businesses is not
+    research, it is a hallucinated default."""
+    key = re.sub(r"\s+", " ", (detail or "").strip().lower())
+    if not key:
+        return False
+    first = _RECENT_DETAILS.get(key)
+    if first is not None and first != (prospect_id or 0):
+        return True
+    if first is None:
+        if len(_RECENT_DETAILS) >= _RECENT_MAX:
+            _RECENT_DETAILS.pop(next(iter(_RECENT_DETAILS)))
+        _RECENT_DETAILS[key] = prospect_id or 0
+    return False
+
+
+def _content_words(text: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9.'+]+", (text or "").lower())
+    return [t.strip(".'") for t in tokens
+            if t.strip(".'") and t.strip(".'") not in _STOPWORDS
+            and (len(t.strip(".'")) > 2 or any(c.isdigit() for c in t))]
+
+
+def grounding_source(prospect: Prospect, intel: dict | None = None) -> str:
+    """The text a human_detail may legitimately be built from: the prospect's
+    own structured facts plus whatever the enricher actually fetched."""
+    intel = intel if intel is not None else (prospect.intel_json or {})
+    facts = [prospect.name, prospect.trade, prospect.city, prospect.state,
+             prospect.owner_name,
+             "family owned" if intel.get("family_owned") else ""]
+    # Structured facts carry their natural phrasing so "your 4.8 star rating
+    # from 57 customers" grounds cleanly; the NUMBERS stay load-bearing, so a
+    # fabricated "4.9 stars" still fails the overlap.
+    if prospect.rating is not None:
+        facts.append(f"{prospect.rating} star stars rating rated")
+    if prospect.review_count is not None:
+        facts.append(f"{prospect.review_count} reviews review customers")
+    if intel.get("years_in_business"):
+        facts.append(f"{intel['years_in_business']} years in business")
+    return (" ".join(str(f) for f in facts if f not in (None, ""))
+            + " " + str(intel.get("about_text") or ""))
+
+
+def detail_discard_reason(detail: str, source_text: str, prospect: Prospect,
+                          min_overlap: float = 0.7) -> str | None:
+    """Why this detail must not reach a draft, or None when it is grounded.
+
+    Three checks, cheapest first: wrong industry vocabulary, wrong city, and
+    source overlap (>=70% of the detail's content words must appear in the
+    text actually fetched for THIS prospect)."""
+    lowered = (detail or "").strip().lower()
+    if not lowered:
+        return None
+    trade = (prospect.trade or "").lower()
+    for topic in _BANNED_TOPICS:
+        if topic in lowered and topic not in trade:
+            return f"off-industry topic '{topic}'"
+    own_city = (prospect.city or "").strip().lower()
+    for city in _KNOWN_CITIES:
+        if city in lowered and city != own_city \
+                and (not own_city or (city not in own_city and own_city not in city)):
+            return f"names city '{city}', prospect is in '{own_city or 'unknown'}'"
+    words = _content_words(lowered)
+    if words:
+        source_words = set(_content_words(source_text))
+        present = sum(1 for w in words if w in source_words)
+        overlap = present / len(words)
+        if overlap < min_overlap:
+            return (f"ungrounded ({present} of {len(words)} content words "
+                    f"found in the fetched source)")
+    return None
+
 
 def is_clean_detail(text: str, facts: dict | None = None) -> bool:
     """Quality gate for a personalization detail before it can reach a draft.
@@ -110,6 +225,9 @@ class LocalOllamaResearcher(ResearchProvider):
             user,
             required_keys=["human_detail", "pain_signal", "bullets"],
         )
+        # Exactly what the model was shown: the grounding gate verifies the
+        # proposed detail against this, nothing else.
+        card["_source_text"] = grounding_source(prospect, intel)
         return card
 
 
@@ -142,12 +260,44 @@ def get_researcher() -> ResearchProvider:
     return LocalOllamaResearcher()
 
 
+def _gate_cached_detail(session: Session, prospect: Prospect,
+                        intel: dict) -> dict:
+    """Grounding also applies to CACHED cards: a card built before this gate
+    existed (or by an older version) may still carry an ungrounded detail, and
+    a cache must never be a loophole. Cheap: no LLM involved."""
+    card = dict(intel.get("card") or {})
+    detail = str(card.get("human_detail") or "")
+    if not detail:
+        return card
+    facts = {"rating": prospect.rating, "review_count": prospect.review_count,
+             "years_in_business": intel.get("years_in_business")}
+    reason = None
+    if not is_clean_detail(detail, facts):
+        # A card cached before a gate existed still carries the old noise
+        # ("best of the bay area sponsored search"); every gate applies on read.
+        reason = "failed the ad/superlative quality gate"
+    if reason is None:
+        reason = detail_discard_reason(detail, grounding_source(prospect, intel),
+                                       prospect)
+    if reason is None and is_repeated_detail(detail, prospect.id):
+        reason = "same detail already used for another prospect this run"
+    if reason:
+        log_event(session, "researcher",
+                  f"{prospect.name}: discarded cached human_detail {detail!r} "
+                  f"({reason})", level="WARNING")
+        card["human_detail"] = ""
+        intel["card"] = card
+        prospect.intel_json = dict(intel)
+        session.commit()
+    return card
+
+
 async def build_intel_card(session: Session, prospect: Prospect,
                            force: bool = False) -> dict:
     """Build (or return cached, <7 days old) intel card for a prospect."""
     intel = dict(prospect.intel_json or {})
     if not force and _card_is_fresh(intel):
-        return intel["card"]
+        return _gate_cached_detail(session, prospect, intel)
 
     researcher = get_researcher()
     try:
@@ -168,18 +318,45 @@ async def build_intel_card(session: Session, prospect: Prospect,
             "bullets": [],
         }
 
+    source_text = str(card.pop("_source_text", "") or "") \
+        or grounding_source(prospect, intel)
+
     facts = {
         "rating": prospect.rating,
         "review_count": prospect.review_count,
         "years_in_business": intel.get("years_in_business"),
     }
-    if not is_clean_detail(str(card.get("human_detail") or ""), facts):
+    detail = str(card.get("human_detail") or "")
+    if detail and not is_clean_detail(detail, facts):
         log.info("%s: human_detail %r failed the quality gate, blanking it",
-                 prospect.name, card.get("human_detail"))
-        card["human_detail"] = ""  # writer falls back to deterministic details
+                 prospect.name, detail)
+        card["human_detail"] = detail = ""
+    if detail:
+        # v2.4 grounding: a detail the fetched source cannot back, a detail
+        # naming someone else's city, a detail from another industry, or a
+        # detail already used on a different prospect this run, does not ship.
+        # An email with no personalization beats an email with a wrong fact.
+        reason = detail_discard_reason(detail, source_text, prospect)
+        if reason is None and is_repeated_detail(detail, prospect.id):
+            reason = "same detail already used for another prospect this run"
+        if reason:
+            log_event(session, "researcher",
+                      f"{prospect.name}: discarded human_detail {detail!r} ({reason})",
+                      level="WARNING")
+            card["human_detail"] = ""
 
     if card.get("owner_name") and not prospect.owner_name:
-        prospect.owner_name = str(card["owner_name"])
+        # Traceability: an owner name the model proposed must literally appear
+        # in this prospect's own fetched text, or it is treated as invented.
+        proposed = str(card["owner_name"]).strip()
+        if proposed and proposed.lower() in source_text.lower():
+            prospect.owner_name = proposed
+        else:
+            log_event(session, "researcher",
+                      f"{prospect.name}: discarded owner_name {proposed!r} "
+                      f"(not found in this prospect's own source)",
+                      level="WARNING")
+            card["owner_name"] = None
     intel["card"] = card
     from engine.util import utcnow
 

@@ -23,7 +23,11 @@ class OllamaProvider(LLMProvider):
                 {"role": "user", "content": user},
             ],
             "stream": False,
-            "options": {"temperature": temperature},
+            # Explicit, not defaults: a writer prompt plus template runs past
+            # Ollama's default 2048-token context, which silently truncates the
+            # system prompt; num_predict bounds a rambling completion.
+            "options": {"temperature": temperature,
+                        "num_ctx": 8192, "num_predict": 700},
         }
         if json_mode:
             payload["format"] = "json"

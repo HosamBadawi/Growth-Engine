@@ -1,5 +1,60 @@
 # Changelog
 
+## 2.4.0 (2026-08-07)
+
+**v2.3 fixed the prose; v2.4 fixes the facts.** A real 23-draft run shipped
+"prom dresses and bridal wear available" to an HVAC owner, queued
+`%20pat.cox@...` and `support@constrafor.com`, drafted a US missed-call pitch
+at a restaurant in Rio de Janeiro, and greeted fgolden@ as "Hi Lindsay". The
+emails were well formed and wrong. This release grounds the inputs.
+
+- **Grounded research or none**: a `human_detail` must be provable against the
+  text actually fetched for THAT prospect (70% content-word overlap), must not
+  name another city, must not belong to another industry (bridal, insurance,
+  catering...), and must not repeat across prospects in a run. Cached cards
+  are gated on read too, so a stale card cannot smuggle a hallucination past
+  the new rules. On discard the writer falls back to the deterministic detail
+  ("your 4.9 stars across 72 reviews"), which was the best draft of the run
+  anyway. An email with no personalisation beats an email with a wrong fact.
+- **Verifier rejects what cannot be an owner's inbox**: malformed addresses
+  (whitespace, percent-encoding), a configurable role denylist (noreply,
+  careers, catering, underwriting... while info/office/service/contact/admin
+  stay allowed), placeholder local parts (demo/test/example/sample/your), and
+  any domain that is neither the prospect's own website nor a free provider.
+  Every rejection records a reason, and /report shows the breakdown.
+- **Geo and niche gate**: TARGET_COUNTRY (default US) and TARGET_TRADES reject
+  out-of-market prospects at prospecting time and again before drafting
+  (foreign ccTLDs on the website or email count). The Rio restaurant case is
+  now a permanent regression test.
+- **Owner-name integrity**: a model-proposed owner name must appear in the
+  prospect's own fetched text; the same owner name is never used on two
+  unrelated prospects in one run; and a personal mailbox that shares nothing
+  with the owner name is greeted "Hi there" rather than with a stranger's name.
+- **The signature is now a rule**: a body that does not end with the campaign
+  signature is rejected (one shipped draft ended on "Should I send you the
+  demo?" with nothing after it).
+- **The model no longer writes subjects**: the deterministic per-prospect
+  pattern is rendered in code, the LLM contract is `{"body": ...}` only. The
+  dominant observed failure (subject returned, body omitted, every retry
+  burned) is structurally gone, and subject variety is better without the
+  model anyway.
+- **Writer reliability**: temperature 0.35, explicit Ollama `num_ctx: 8192`
+  and `num_predict: 700` (the writer prompt overran the silent 2048 default),
+  JSON retries now shrink the prompt instead of growing it, and the first 400
+  characters of bad model output are logged so failures are diagnosable.
+- **Per-role fallback chain**: a role's assigned model that fails now hands
+  over to the env default (previously "fallback to local" was a no-op for
+  local operators: it retried the exact model that had just failed). Every
+  hand-over is an event and /report counts them.
+- **Template variety**: three structurally different first emails
+  (`initial.j2`, `initial_b.j2`, `initial_c.j2`) selected by prospect id, all
+  holding zero `check_style` violations. Eleven byte-identical fallback drafts
+  in one batch was a bulk-mail fingerprint.
+- **Display polish**: trades render in prose casing (HVAC, plumbing,
+  electrical), subject lines get title-cased company names, and missing spaces
+  after commas in legal names are normalised.
+
+
 ## 2.3.1 (2026-08-07)
 
 **The From header joins the placeholder gate.** v2.3.0 validated the campaign

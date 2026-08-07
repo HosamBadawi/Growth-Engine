@@ -24,10 +24,16 @@ def safe_settings(monkeypatch):
     monkeypatch.setenv("SEND_WINDOW_START", "09:00")
     monkeypatch.setenv("SEND_WINDOW_END", "16:30")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:9")  # dead port
+    # Targeting off by default so pre-v2.4 tests (international OSM runs, EG/BR
+    # fixtures) keep their meaning; targeting tests opt in explicitly.
+    monkeypatch.setenv("TARGET_COUNTRY", "")
+    monkeypatch.setenv("TARGET_TRADES", "")
     get_settings.cache_clear()
     import engine.campaign as campaign_mod
+    import engine.researcher as researcher_mod
 
     campaign_mod._warned_fields = ()  # warn-once dedupe must not leak across tests
+    researcher_mod.reset_detail_memory()
     yield
     get_settings.cache_clear()
 
