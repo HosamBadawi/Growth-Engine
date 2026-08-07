@@ -347,6 +347,17 @@ async def send_touch(session: Session, touch: Touch) -> tuple[bool, str]:
                   f"Refused send to {prospect.name}: {reason}", level="WARNING")
         return False, reason
 
+    # A placeholder campaign profile must never reach SMTP. The touch stays
+    # QUEUED (not cancelled): the draft is fine, the profile needs fixing.
+    from engine.campaign import CampaignNotReady, assert_campaign_ready
+
+    try:
+        assert_campaign_ready(mode)
+    except CampaignNotReady as exc:
+        log_event(session, "sender", f"Refused send to {prospect.name}: {exc}",
+                  level="ERROR")
+        return False, str(exc)
+
     to_addr, subject = prospect.email, touch.subject or "(no subject)"
 
     if mode == "DRY_RUN":
@@ -436,6 +447,10 @@ def _after_send(session: Session, touch: Touch) -> None:
 
 # ── scheduler tick ───────────────────────────────────────────────────────────
 
+# One blocked-campaign event when it starts, not one per queued touch per minute.
+_campaign_block_logged = False
+
+
 async def sender_tick() -> None:
     """Runs every minute. Sends at most one email per tick in real modes."""
     from db.session import new_session
@@ -456,6 +471,18 @@ async def sender_tick() -> None:
             return
 
         if mode != "DRY_RUN":
+            global _campaign_block_logged
+            from engine.campaign import CampaignNotReady, assert_campaign_ready
+
+            try:
+                assert_campaign_ready(mode)
+                _campaign_block_logged = False
+            except CampaignNotReady as exc:
+                if not _campaign_block_logged:
+                    log_event(session, "sender", f"Sending blocked: {exc}",
+                              level="ERROR")
+                    _campaign_block_logged = True
+                return
             if not in_send_window(now):
                 return
             gate = get_state(session, KEY_NEXT_SEND_AT)

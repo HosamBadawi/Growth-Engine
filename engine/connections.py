@@ -120,8 +120,13 @@ def resolve_email(session: Session | None = None) -> EmailConfig:
         smtp_user=smtp_user,
         smtp_password=smtp_password,
         imap_host=pick("imap_host", settings.imap_host),
-        imap_user=cfg.get("imap_user") or settings.imap_user or smtp_user,
-        imap_password=cfg.get("imap_password") or settings.imap_password or smtp_password,
+        # Within a saved connection, blank IMAP fields fall back to that
+        # connection's OWN SMTP account before any env value: mixing one
+        # account's SMTP with another's IMAP would poll the wrong inbox.
+        imap_user=(cfg.get("imap_user") or cfg.get("smtp_user")
+                   or settings.imap_user or smtp_user),
+        imap_password=(cfg.get("imap_password") or cfg.get("smtp_password")
+                       or settings.imap_password or smtp_password),
         from_name=pick("from_name", settings.from_name),
         from_email=pick("from_email", settings.from_email),
         postal_address=pick("postal_address", settings.postal_address),

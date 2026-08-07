@@ -141,6 +141,13 @@ async def run_find(trade: str, city: str, limit: int,
 async def generate_all_drafts(progress: ProgressCb | None = None) -> list[int]:
     """Write drafts for every VERIFIED prospect without a live EMAIL_1 touch.
     Returns the new touch ids (fetch fresh in the caller's session)."""
+    from engine.campaign import assert_campaign_ready
+    from engine.config import get_settings
+
+    # In SANDBOX/LIVE a placeholder campaign stops the whole run with one clear
+    # error instead of 50 identical per-prospect failures. DRY_RUN warns once.
+    assert_campaign_ready(get_settings().engine_mode)
+
     session = new_session()
     try:
         candidates = session.execute(
@@ -156,11 +163,26 @@ async def generate_all_drafts(progress: ProgressCb | None = None) -> list[int]:
             ).scalars().all()
         }
         todo = [p for p in candidates if p.id not in existing]
+
+        named = sum(1 for p in todo if p.owner_name)
+        percent = round(100 * named / len(todo)) if todo else 0
+        await _report(progress,
+                      f"owner name coverage: {named} of {len(todo)} ({percent}%)")
+        if get_settings().require_owner_name:
+            skipped = len(todo) - named
+            todo = [p for p in todo if p.owner_name]
+            if skipped:
+                await _report(progress,
+                              f"REQUIRE_OWNER_NAME: skipping {skipped} prospects "
+                              f"with no owner name (they stay VERIFIED)")
+
         await _report(progress, f"Drafting for {len(todo)} verified prospects...")
         touch_ids = []
         for prospect in todo:
             try:
                 touch = await generate_draft(session, prospect)
+                if touch is None:
+                    continue
                 touch_ids.append(touch.id)
                 await _report(progress, f"Drafted: {prospect.name}")
             except Exception as exc:  # noqa: BLE001
@@ -169,3 +191,49 @@ async def generate_all_drafts(progress: ProgressCb | None = None) -> list[int]:
         return touch_ids
     finally:
         session.close()
+
+
+def count_drafts(session) -> int:
+    from sqlalchemy import func
+
+    return session.execute(
+        select(func.count(Touch.id)).where(Touch.status == TouchStatus.DRAFT)
+    ).scalar() or 0
+
+
+def purge_drafts(session, with_outbox: bool = False) -> dict:
+    """Delete every DRAFT touch and reset its prospect to VERIFIED.
+
+    The one way to regenerate cleanly after a writer change. QUEUED and SENT
+    touches are never touched: this clears the review queue, not history.
+    `with_outbox` also removes the DRY_RUN .eml artifacts so the next run's
+    outbox holds only current drafts.
+    """
+    drafts = session.execute(
+        select(Touch).where(Touch.status == TouchStatus.DRAFT)
+    ).scalars().all()
+    prospect_ids = {t.prospect_id for t in drafts}
+    for touch in drafts:
+        session.delete(touch)
+    reset = 0
+    for prospect_id in prospect_ids:
+        prospect = session.get(Prospect, prospect_id)
+        if prospect and prospect.status == ProspectStatus.DRAFTED:
+            prospect.status = ProspectStatus.VERIFIED
+            reset += 1
+    eml_removed = 0
+    if with_outbox:
+        from engine.sender import OUTBOX_DIR
+
+        if OUTBOX_DIR.exists():
+            for eml in OUTBOX_DIR.glob("*.eml"):
+                try:
+                    eml.unlink()
+                    eml_removed += 1
+                except OSError:  # noqa: PERF203 (a locked file must not stop the purge)
+                    pass
+    session.commit()
+    log_event(session, "writer",
+              f"Purged {len(drafts)} drafts, reset {reset} prospects to VERIFIED"
+              + (f", removed {eml_removed} .eml files" if with_outbox else ""))
+    return {"deleted": len(drafts), "reset": reset, "eml_removed": eml_removed}

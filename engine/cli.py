@@ -7,6 +7,7 @@ Examples (venv active, from repo root):
   python -m engine.cli verify-email someone@example.com
   python -m engine.cli status
   python -m engine.cli send-tick
+  python -m engine.cli purge-drafts [--with-outbox] --yes
   python -m engine.cli benchmark
 """
 import argparse
@@ -34,6 +35,14 @@ def main() -> None:
 
     p_verify = sub.add_parser("verify-email", help="verify one address")
     p_verify.add_argument("email")
+
+    p_purge = sub.add_parser(
+        "purge-drafts",
+        help="delete every DRAFT touch, reset those prospects to VERIFIED")
+    p_purge.add_argument("--with-outbox", action="store_true",
+                         help="also delete the generated .eml files in outbox/")
+    p_purge.add_argument("--yes", action="store_true",
+                         help="actually delete (without it, only reports the count)")
 
     p_research = sub.add_parser("research", help="build + print the intel card")
     p_research.add_argument("prospect_id", type=int)
@@ -102,6 +111,26 @@ async def _dispatch(args) -> None:
         session = new_session()
         try:
             print(build_report_text(session))
+        finally:
+            session.close()
+
+    elif args.cmd == "purge-drafts":
+        from engine.pipeline import count_drafts, purge_drafts
+
+        session = new_session()
+        try:
+            pending = count_drafts(session)
+            if not args.yes:
+                print(f"{pending} drafts would be deleted and their prospects "
+                      f"reset to VERIFIED (QUEUED and SENT are never touched).")
+                print("Re-run with --yes to actually delete.")
+                return
+            result = purge_drafts(session, with_outbox=args.with_outbox)
+            summary = (f"Deleted {result['deleted']} drafts, reset "
+                       f"{result['reset']} prospects to VERIFIED")
+            if args.with_outbox:
+                summary += f", removed {result['eml_removed']} .eml files"
+            print(summary)
         finally:
             session.close()
 

@@ -16,7 +16,19 @@ from engine.connections import get_active
 
 log = logging.getLogger("campaign")
 
-EXAMPLE_MARKER = "Example Co"  # presence of this anywhere = placeholder campaign
+# Any of these inside a campaign field means the operator has not replaced the
+# example value yet. Checked case-insensitively across the fields below.
+PLACEHOLDER_MARKERS = ("example.com", "example co", "your name",
+                       "your postal address here", "dryrun@localhost",
+                       "yourdomain", "changeme", "your city")
+
+# The fields a real campaign must have filled in before anything real happens.
+CHECKED_FIELDS = ("company", "sender_name", "website", "demo_url",
+                  "calendar_url", "signature", "postal_address", "product_pitch")
+
+
+class CampaignNotReady(RuntimeError):
+    """Raised in SANDBOX/LIVE when the campaign profile is still placeholder."""
 
 
 @dataclass
@@ -44,8 +56,25 @@ class Campaign:
     template_dir: str = ""
 
     @property
+    def placeholder_fields(self) -> list[str]:
+        """Names of every field still carrying an example value.
+
+        An empty postal address counts too: a missing CAN-SPAM address is as
+        broken as a fake one, legally rather than stylistically."""
+        fields = []
+        for name in CHECKED_FIELDS:
+            value = str(getattr(self, name) or "")
+            if name == "postal_address" and not value.strip():
+                fields.append(name)
+                continue
+            lowered = value.lower()
+            if any(marker in lowered for marker in PLACEHOLDER_MARKERS):
+                fields.append(name)
+        return fields
+
+    @property
     def is_placeholder(self) -> bool:
-        return EXAMPLE_MARKER.lower() in f"{self.company} {self.signature}".lower()
+        return bool(self.placeholder_fields)
 
     def job_value_for(self, trade: str | None) -> int:
         if trade:
@@ -138,6 +167,37 @@ def get_campaign(session: Session | None = None) -> Campaign:
     if not conn:
         return base
     return _merge(base, conn)
+
+
+# Dedupe for the DRY_RUN warning: one line per distinct offending-field set,
+# not one per drafted prospect.
+_warned_fields: tuple = ()
+
+
+def assert_campaign_ready(mode: str) -> None:
+    """Raise in SANDBOX/LIVE if the campaign profile is still placeholder.
+
+    DRY_RUN warns and continues: the operator must be able to exercise the
+    whole pipeline before the profile is filled in. The other two modes touch
+    the real world, so there the placeholder profile is a hard stop."""
+    global _warned_fields
+    fields = get_campaign().placeholder_fields
+    if not fields:
+        _warned_fields = ()
+        return
+    if (mode or "").upper() == "DRY_RUN":
+        key = tuple(fields)
+        if key != _warned_fields:
+            _warned_fields = key
+            log.warning(
+                "campaign profile still has placeholder values in: %s "
+                "(fine for DRY_RUN, blocks SANDBOX and LIVE). "
+                "Fill them in at /admin/campaign.", ", ".join(fields))
+        return
+    raise CampaignNotReady(
+        "campaign profile still has placeholder values in: "
+        + ", ".join(fields)
+        + ". Fill them in at /admin/campaign before sending anything real.")
 
 
 CAMPAIGN_FIELDS = [

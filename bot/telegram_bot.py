@@ -77,6 +77,7 @@ async def cmd_help(message: Message) -> None:
         "/report  full daily report now\n"
         "/pause all | /pause <email>\n"
         "/resume all\n"
+        "/purgedrafts  throw away all pending drafts (two-step)\n"
         "/golive  one-time confirmation required for LIVE mode"
     )
 
@@ -300,6 +301,49 @@ async def cmd_resume(message: Message) -> None:
         session.close()
 
 
+def _campaign_block_message() -> str | None:
+    """Human-readable reason /golive must refuse, or None when ready."""
+    from engine.campaign import CampaignNotReady, assert_campaign_ready
+
+    try:
+        assert_campaign_ready("LIVE")
+    except CampaignNotReady:
+        from engine.campaign import get_campaign
+
+        fields = ", ".join(get_campaign().placeholder_fields)
+        return (f"Cannot go live: the campaign profile still has placeholder "
+                f"values in: {fields}.\nFill them in at /admin/campaign, "
+                f"then run /golive again.")
+    return None
+
+
+@router.message(Command("purgedrafts"))
+async def cmd_purgedrafts(message: Message, command: CommandObject) -> None:
+    """Two-step draft purge: report first, delete only on '/purgedrafts confirm'."""
+    from engine.pipeline import count_drafts, purge_drafts
+
+    arg = (command.args or "").strip().lower()
+    session = new_session()
+    try:
+        if arg != "confirm":
+            count = count_drafts(session)
+            if not count:
+                await message.answer("No pending drafts to purge.")
+                return
+            await message.answer(
+                f"{count} drafts would be deleted and their prospects reset to "
+                f"VERIFIED so they re-enter the drafting queue.\n"
+                f"QUEUED and SENT emails are never touched.\n\n"
+                f"Run /purgedrafts confirm to proceed.")
+            return
+        result = purge_drafts(session)
+        await message.answer(
+            f"Deleted {result['deleted']} drafts, reset {result['reset']} "
+            f"prospects to VERIFIED. Re-run /draft when ready.")
+    finally:
+        session.close()
+
+
 @router.message(Command("golive"))
 async def cmd_golive(message: Message) -> None:
     settings = get_settings()
@@ -308,6 +352,10 @@ async def cmd_golive(message: Message) -> None:
             f"ENGINE_MODE is {settings.engine_mode.upper()}. Set ENGINE_MODE=LIVE in .env, "
             "restart, then run /golive again to confirm."
         )
+        return
+    blocked = _campaign_block_message()
+    if blocked:
+        await message.answer(blocked)
         return
     markup = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="YES, go live", callback_data="live:yes"),
@@ -401,6 +449,13 @@ async def on_edit_draft_text(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "live:yes")
 async def cb_live_yes(callback: CallbackQuery) -> None:
+    # Re-check at confirmation time too: the profile may have been reverted
+    # between the /golive prompt and the button press.
+    blocked = _campaign_block_message()
+    if blocked:
+        await callback.answer("Campaign profile not ready")
+        await callback.message.edit_text(blocked)
+        return
     session = new_session()
     try:
         set_state(session, KEY_LIVE_CONFIRMED, "1")

@@ -48,6 +48,14 @@ def compute_stats(session: Session) -> dict:
                           .where(Prospect.status != ProspectStatus.NEW)),
         "verified": count(select(func.count(Prospect.id))
                           .where(Prospect.email_verification_level.in_(VERIFIED_LEVELS))),
+        # Owner-name coverage over prospects awaiting a draft: how often the
+        # writer will fall back to "Hi there" is an operator-visible number now.
+        "verified_stage": count(select(func.count(Prospect.id))
+                                .where(Prospect.status == ProspectStatus.VERIFIED)),
+        "owner_named": count(select(func.count(Prospect.id))
+                             .where(Prospect.status == ProspectStatus.VERIFIED,
+                                    Prospect.owner_name.isnot(None),
+                                    Prospect.owner_name != "")),
         "form_only": count(select(func.count(Prospect.id))
                            .where(Prospect.status == ProspectStatus.FORM_ONLY)),
         "drafts_pending": count(select(func.count(Touch.id))
@@ -110,11 +118,15 @@ def build_report_text(session: Session) -> str:
     reply_lines = "\n".join(
         f"    {cls}: {replies[cls]}" for cls in ReplyClass.ALL if replies.get(cls)
     ) or "    none yet"
+    coverage = (round(100 * s["owner_named"] / s["verified_stage"])
+                if s["verified_stage"] else 0)
     return (
         f"Growth Engine daily report [{s['mode']}]"
         f"{' *** PAUSED ***' if s['paused'] else ''}\n"
         f"Found: {s['prospects_found']} total ({s['found_today']} today)\n"
         f"Enriched: {s['enriched']} | Verified: {s['verified']} | Form only: {s['form_only']}\n"
+        f"Owner names: {s['owner_named']} of {s['verified_stage']} awaiting draft "
+        f"({coverage}%)\n"
         f"Drafts awaiting approval: {s['drafts_pending']} | Approved: {s['approved']} "
         f"| Queued: {s['queued']}\n"
         f"Sent today: {s['sent_today']} | Total sent: {s['total_sent']}\n"

@@ -74,7 +74,7 @@ def test_template_override_precedence(authed):
 
     source, is_override = read_template_source("initial.j2")
     assert not is_override
-    edited = source.replace("quick question", "custom subject test")
+    edited = source.replace("One question", "custom subject test")
     response = authed.post("/admin/templates/save",
                            data={"name": "initial.j2", "source": edited},
                            follow_redirects=False)

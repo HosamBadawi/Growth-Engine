@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     verifier_helo_domain: str = "example.com"
     verifier_probe_from: str = "verify@example.com"
     strict_no_hyphens: bool = False
+    # True = draft only for prospects with a discovered owner name; the rest
+    # stay VERIFIED instead of receiving a "Hi there" email.
+    require_owner_name: bool = False
 
     @property
     def effective_researcher_model(self) -> str:

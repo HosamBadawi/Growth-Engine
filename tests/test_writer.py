@@ -38,10 +38,11 @@ def _valid_email1_body(prospect) -> str:
 def test_email1_forbids_calendar_link(prospect):
     settings = get_settings()
     body = _valid_email1_body(prospect)
-    assert check_style("quick question", body, prospect, TouchType.EMAIL_1) == []
+    subject = f"quick question for {prospect.name}"
+    assert check_style(subject, body, prospect, TouchType.EMAIL_1) == []
 
     body_with_cal = body + f"\nMy calendar: {settings.calendly_url}"
-    violations = check_style("quick question", body_with_cal, prospect, TouchType.EMAIL_1)
+    violations = check_style(subject, body_with_cal, prospect, TouchType.EMAIL_1)
     assert any("must NOT contain the calendar link" in v for v in violations)
 
 

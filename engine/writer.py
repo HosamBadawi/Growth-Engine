@@ -76,6 +76,19 @@ EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FAFF☀-➿⬀-⯿←-⇿️]"
 )
 
+URL_RE = re.compile(r"https?://\S+")
+
+# Rendered against template_context(), selected by prospect.id so the same
+# prospect always gets the same subject and runs stay reproducible. A single
+# byte-identical subject across hundreds of sends is a bulk-mail fingerprint.
+SUBJECT_PATTERNS = [
+    "missed call at {company}?",
+    "quick question for {company}",
+    "{city} {trade} question",
+    "after hours calls at {company}",
+    "{company}, one question",
+]
+
 
 def sanitize_detail(text: str) -> str:
     """Make an LLM-produced snippet safe for the no-dash templates."""
@@ -119,7 +132,7 @@ def template_context(prospect: Prospect, card: dict | None = None) -> dict:
             detail = f"your {prospect.rating} star rating from {prospect.review_count} customers"
         else:
             detail = "your local reputation"
-    return {
+    context = {
         "first_name": first_name,
         "company": prospect.name,
         "city": (prospect.city or "your city").title(),
@@ -137,6 +150,10 @@ def template_context(prospect: Prospect, card: dict | None = None) -> dict:
         "sender_name": campaign.sender_name,
         "sender_company": campaign.company,
     }
+    # Deterministic per-prospect subject: same prospect, same subject, always.
+    context["subject_line"] = SUBJECT_PATTERNS[
+        (prospect.id or 0) % len(SUBJECT_PATTERNS)].format(**context)
+    return context
 
 
 def render_email_template(
@@ -191,6 +208,90 @@ def _personal_tokens(prospect: Prospect) -> set[str]:
     return tokens
 
 
+def _strip_for_readability(body: str, signature: str = "") -> str:
+    """The body minus greeting line and signature block, so readability rules
+    judge only the prose. A signature without a full stop is not a style crime."""
+    lines = body.strip().splitlines()
+    if lines and lines[0].strip().lower().startswith("hi"):
+        lines = lines[1:]
+    found_signature = False
+    signature_first = (signature or "").strip().splitlines()
+    signature_first = signature_first[0].strip().lower() if signature_first else ""
+    if signature_first:
+        for index, line in enumerate(lines):
+            if line.strip().lower() == signature_first:
+                lines, found_signature = lines[:index], True
+                break
+    text = "\n".join(lines).strip()
+    if not found_signature:
+        # No exact signature match (edited drafts, test bodies): treat the last
+        # blank-line-separated block as the sign-off, unless it is all there is.
+        blocks = [b for b in re.split(r"\n\s*\n", text) if b.strip()]
+        if len(blocks) >= 2:
+            text = "\n\n".join(blocks[:-1]).strip()
+    return text
+
+
+def _readability_violations(body: str, signature: str = "") -> list[str]:
+    """Rules that catch an unreadable draft, not just a rule-breaking one.
+
+    The v2.3 trigger: a 58 word run-on with no punctuation sailed through every
+    existing check because none of them asked whether the text could be read.
+    """
+    violations = []
+    stripped = _strip_for_readability(body, signature)
+    if not stripped:
+        return ["body has no prose beyond greeting and signature"]
+    # URLs carry dots that are not sentence breaks; analyse with them masked.
+    prose = URL_RE.sub("thelink", stripped)
+
+    # 1. Longest span of words with no sentence break at all.
+    longest = max((len(seg.split()) for seg in re.split(r"[.?!:\n]", prose)),
+                  default=0)
+    if longest > 40:
+        violations.append(f"contains a {longest} word run with no sentence break")
+
+    # 2 + 3. Sentence length and sentence count.
+    sentences = [s.strip() for s in re.split(r"[.?!]+", prose)
+                 if len(s.split()) >= 2]
+    for sentence in sentences:
+        count = len(sentence.split())
+        if count > 32:
+            head = " ".join(sentence.split()[:6])
+            violations.append(f'sentence starting "{head}" is {count} words, '
+                              f"keep every sentence under 32 words")
+    if len(sentences) < 4:
+        violations.append(f"body has only {len(sentences)} sentences, "
+                          f"write at least 4 short ones")
+
+    # 4. Every prose line ends like a sentence (a URL may close a line).
+    for line in stripped.splitlines():
+        text = line.strip()
+        if not text or URL_RE.match(text.split()[-1]):
+            continue
+        if text[-1] not in ".?!:":
+            head = " ".join(text.split()[:6])
+            violations.append(f'line starting "{head}" must end with . ? ! or :')
+
+    # 5. Paragraph structure.
+    paragraphs = [b for b in re.split(r"\n\s*\n", stripped) if b.strip()]
+    if len(paragraphs) < 3:
+        violations.append(f"body has {len(paragraphs)} paragraphs, use at "
+                          f"least 3 separated by blank lines")
+
+    # 6. Repetition: the same 5 word phrase twice reads like a stuck record.
+    words = re.findall(r"[a-z0-9$']+", prose.lower())
+    seen: dict[str, int] = {}
+    for index in range(len(words) - 4):
+        gram = " ".join(words[index:index + 5])
+        seen[gram] = seen.get(gram, 0) + 1
+    repeated = next((g for g, c in seen.items() if c > 1), None)
+    if repeated:
+        violations.append(f'the phrase "{repeated}" appears more than once, '
+                          f"vary the wording")
+    return violations
+
+
 def check_style(subject: str, body: str, prospect: Prospect,
                 touch_type: str = TouchType.EMAIL_1) -> list[str]:
     """Return list of style violations (empty = compliant).
@@ -235,6 +336,30 @@ def check_style(subject: str, body: str, prospect: Prospect,
     if not body.strip().lower().startswith("hi "):
         greeting = prospect.owner_name.split()[0] if prospect.owner_name else "there"
         violations.append(f'must open with the greeting "Hi {greeting}," on its own line')
+
+    violations.extend(_readability_violations(body, campaign.signature))
+
+    # Link count (the signature's own URL does not count against the body).
+    url_count = len(URL_RE.findall(_strip_for_readability(body, campaign.signature)))
+    if touch_type == TouchType.EMAIL_1:
+        if url_count != 1:
+            violations.append(f"the body must contain exactly one http link, "
+                              f"the demo link, found {url_count}")
+        # Subject rules apply to the first cold email; follow-ups thread as "re:".
+        subject_words = len(subject.split())
+        subject_lower = subject.lower()
+        name_lower = (prospect.name or "").lower()
+        city_lower = (prospect.city or "").lower()
+        if not ((name_lower and name_lower in subject_lower)
+                or (city_lower and city_lower in subject_lower)):
+            violations.append("the subject must contain the company name or the city")
+        if subject_words > 8:
+            violations.append(f"the subject is {subject_words} words, use 8 or fewer")
+        if subject.rstrip().endswith("."):
+            violations.append("the subject must not end with a full stop")
+    elif url_count > 2:
+        violations.append(f"the body must not carry more than two http links, "
+                          f"found {url_count}")
     return violations
 
 
@@ -248,7 +373,10 @@ def writer_system_prompt(prospect: Prospect | None = None) -> str:
 {campaign.company} sells {campaign.product_pitch} to {campaign.target_niche}.
 
 Hard style rules, every one is checked by a machine:
-- Under 150 words total in the body.
+- Under 150 words total in the body. Short sentences, real punctuation, at
+  least 4 sentences in at least 3 paragraphs separated by blank lines.
+- Subject line: 8 words or fewer, must mention the company name or the city,
+  lowercase apart from proper nouns, no full stop at the end.
 - The FIRST line must reference the prospect's specific detail from the intel.
 - Include exactly one concrete money pain (a job value walking away).
 - Include the demo link exactly as given. Do NOT include any calendar or
@@ -262,15 +390,26 @@ plain text with real line breaks. Do not copy the template verbatim, adapt it
 to this specific prospect."""
 
 
-async def generate_draft(session: Session, prospect: Prospect) -> Touch:
-    """Generate (or fall back to template) an EMAIL_1 draft for a prospect."""
+async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
+    """Generate (or fall back to template) an EMAIL_1 draft for a prospect.
+
+    Returns None (leaving the prospect VERIFIED) when REQUIRE_OWNER_NAME is on
+    and no owner name was discovered."""
+    from engine.campaign import assert_campaign_ready, get_campaign
+
     settings = get_settings()
+    assert_campaign_ready(settings.engine_mode)
+    if settings.require_owner_name and not prospect.owner_name:
+        log.info("Skipping %s: no owner name and REQUIRE_OWNER_NAME is on",
+                 prospect.name)
+        return None
     card = await build_intel_card(session, prospect)
     tpl_subject, tpl_body = render_email_template("initial.j2", prospect, card)
 
-    from engine.campaign import get_campaign
-
     campaign = get_campaign()
+    context = template_context(prospect, card)
+    subject_options = ", ".join(
+        f'"{pattern.format(**context)}"' for pattern in SUBJECT_PATTERNS)
     base_user = (
         f"Prospect:\n"
         f"- company: {prospect.name}\n"
@@ -281,8 +420,7 @@ async def generate_draft(session: Session, prospect: Prospect) -> Touch:
         f"- average job value: ${campaign.job_value_for(prospect.trade)}\n"
         f"- demo link: {campaign.demo_url}\n\n"
         f"Proven template to adapt (do not copy verbatim):\n---\n{tpl_body}\n---\n"
-        f'Subject line options to adapt: "quick question about your after-hours calls" '
-        f'or "missed call at {prospect.name}?"'
+        f"Subject line options, pick one and adapt it: {subject_options}"
     )
 
     subject, body, source = tpl_subject, tpl_body, "template"

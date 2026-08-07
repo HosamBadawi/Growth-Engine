@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.3.0 (2026-08-02)
+
+**A quality gate release: no new modules, seven focused fixes.** The trigger
+was a DRY_RUN QA pass that found a 58 word run-on with one full stop queued in
+the outbox. It had passed every existing check, because none of them asked
+whether the text could actually be read.
+
+- **Readability rules in `check_style()`**: longest unpunctuated run capped at
+  40 words, sentences capped at 32, at least 4 sentences in at least 3
+  paragraphs, every prose line ends like a sentence (URLs may close a line),
+  no 5 word phrase repeated, exactly one link in the first email. Violations
+  feed the existing LLM retry loop, so the model is told exactly what it broke.
+- **Placeholder campaign is now a hard block**: `placeholder_fields` names
+  every campaign field still carrying an example value (an empty CAN-SPAM
+  postal address counts). DRY_RUN warns once and continues; SANDBOX and LIVE
+  raise `CampaignNotReady` at draft time, at send time before any SMTP
+  connection, and in `/golive`. Emailing `example.com/demo` to a real prospect
+  is no longer possible.
+- **Per-prospect subject lines**: five subject patterns rendered from the
+  prospect, selected deterministically by id, so runs are reproducible and no
+  two prospects share a byte-identical subject. New subject rules: must carry
+  the company name or city, 8 words or fewer, no trailing full stop.
+- **Owner-name coverage is visible**: `/report` and `cli status` show how many
+  prospects awaiting a draft have a discovered owner name, and each drafting
+  run logs the coverage. Optional `REQUIRE_OWNER_NAME=true` skips the
+  "Hi there" fallback entirely, leaving those prospects VERIFIED.
+- **The sender's name appears once**: `footer.j2` no longer repeats
+  name | company | website below the signature. Unsubscribe line and postal
+  address stay, that part is CAN-SPAM, not style.
+- **`purge-drafts`** (CLI, `--with-outbox --yes`) and **`/purgedrafts`**
+  (Telegram, two-step confirm): throw away every DRAFT touch and reset its
+  prospect to VERIFIED so the queue regenerates cleanly after a writer change.
+  QUEUED and SENT are never touched.
+- Fixed `resolve_email()` mixing accounts: a saved connection's blank IMAP
+  fields now fall back to that connection's own SMTP credentials before any
+  env value.
+
+
 ## 2.2.0 (2026-07-26)
 
 **Turning a bare business name into a reachable contact.**
