@@ -307,13 +307,10 @@ def _campaign_block_message() -> str | None:
 
     try:
         assert_campaign_ready("LIVE")
-    except CampaignNotReady:
-        from engine.campaign import get_campaign
-
-        fields = ", ".join(get_campaign().placeholder_fields)
-        return (f"Cannot go live: the campaign profile still has placeholder "
-                f"values in: {fields}.\nFill them in at /admin/campaign, "
-                f"then run /golive again.")
+    except CampaignNotReady as exc:
+        # The exception text already names every offending field and where to
+        # fix it (campaign fields at /admin/campaign, identity in .env).
+        return f"Cannot go live: {exc}\nFix that, then run /golive again."
     return None
 
 

@@ -94,6 +94,23 @@ def resolve_telegram(session: Session | None = None) -> TelegramConfig:
     return TelegramConfig(settings.telegram_bot_token, settings.telegram_user_id, "env")
 
 
+def raw_email_identity(session: Session | None = None) -> tuple[str, str]:
+    """(from_name, from_email) exactly as configured: saved connection first,
+    then .env, with NO campaign fallback. The placeholder gate checks these raw
+    values, so an operator cannot ship on an identity they never actually set."""
+    settings = get_settings()
+    own = session is None
+    session = session or _own_session()
+    try:
+        conn = get_active(session, ConnectionKind.EMAIL)
+    finally:
+        if own:
+            session.close()
+    cfg = (conn.config_json or {}) if conn else {}
+    return (cfg.get("from_name") or settings.from_name,
+            cfg.get("from_email") or settings.from_email)
+
+
 def resolve_email(session: Session | None = None) -> EmailConfig:
     settings = get_settings()
     own = session is None
@@ -107,6 +124,17 @@ def resolve_email(session: Session | None = None) -> EmailConfig:
 
     def pick(key: str, env_value):
         return cfg.get(key) or env_value
+
+    from_name = cfg.get("from_name") or settings.from_name
+    if not from_name.strip() or from_name.strip().lower() == "your name":
+        # FROM_NAME never configured: the campaign's sender is a better From
+        # identity than the literal example string. Local import, campaign.py
+        # imports this module at load time.
+        from engine.campaign import get_campaign
+
+        candidate = (get_campaign().sender_name or "").strip()
+        if candidate and candidate.lower() != "your name":
+            from_name = candidate
 
     smtp_user = pick("smtp_user", settings.smtp_user)
     smtp_password = pick("smtp_password", settings.smtp_password)
@@ -127,7 +155,7 @@ def resolve_email(session: Session | None = None) -> EmailConfig:
                    or settings.imap_user or smtp_user),
         imap_password=(cfg.get("imap_password") or cfg.get("smtp_password")
                        or settings.imap_password or smtp_password),
-        from_name=pick("from_name", settings.from_name),
+        from_name=from_name,
         from_email=pick("from_email", settings.from_email),
         postal_address=pick("postal_address", settings.postal_address),
         source=f"connection:{conn.name}" if conn else "env",

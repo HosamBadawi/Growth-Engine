@@ -174,30 +174,57 @@ def get_campaign(session: Session | None = None) -> Campaign:
 _warned_fields: tuple = ()
 
 
+def _identity_placeholder_fields() -> list[str]:
+    """Placeholder checks on the RAW From identity (connection, then .env).
+
+    Deliberately raw: resolve_email() heals an unset FROM_NAME from the
+    campaign's sender_name so DRY_RUN artifacts look right, but the gate still
+    demands the operator set the identity explicitly. An empty FROM_EMAIL is
+    checked as the "dryrun@localhost" the message builder would stamp on it."""
+    from engine.connections import raw_email_identity
+
+    from_name, from_email = raw_email_identity()
+    fields = []
+    if not (from_name or "").strip() or any(
+            marker in from_name.lower() for marker in PLACEHOLDER_MARKERS):
+        fields.append("from_name")
+    effective_from_email = ((from_email or "").strip() or "dryrun@localhost").lower()
+    if any(marker in effective_from_email for marker in PLACEHOLDER_MARKERS):
+        fields.append("from_email")
+    return fields
+
+
 def assert_campaign_ready(mode: str) -> None:
-    """Raise in SANDBOX/LIVE if the campaign profile is still placeholder.
+    """Raise in SANDBOX/LIVE while the campaign profile or the From identity
+    is still placeholder.
 
     DRY_RUN warns and continues: the operator must be able to exercise the
     whole pipeline before the profile is filled in. The other two modes touch
-    the real world, so there the placeholder profile is a hard stop."""
+    the real world, so there a placeholder anywhere is a hard stop."""
     global _warned_fields
-    fields = get_campaign().placeholder_fields
-    if not fields:
+    campaign_fields = get_campaign().placeholder_fields
+    identity_fields = _identity_placeholder_fields()
+    if not campaign_fields and not identity_fields:
         _warned_fields = ()
         return
+    parts = []
+    if campaign_fields:
+        parts.append("campaign profile still has placeholder values in: "
+                     + ", ".join(campaign_fields)
+                     + " (fill them in at /admin/campaign)")
+    if identity_fields:
+        parts.append("sender identity still has placeholder values in: "
+                     + ", ".join(identity_fields)
+                     + " (set FROM_NAME / FROM_EMAIL in .env or in the saved "
+                       "email connection)")
+    message = "; ".join(parts)
     if (mode or "").upper() == "DRY_RUN":
-        key = tuple(fields)
+        key = tuple(campaign_fields + identity_fields)
         if key != _warned_fields:
             _warned_fields = key
-            log.warning(
-                "campaign profile still has placeholder values in: %s "
-                "(fine for DRY_RUN, blocks SANDBOX and LIVE). "
-                "Fill them in at /admin/campaign.", ", ".join(fields))
+            log.warning("%s (fine for DRY_RUN, blocks SANDBOX and LIVE)", message)
         return
-    raise CampaignNotReady(
-        "campaign profile still has placeholder values in: "
-        + ", ".join(fields)
-        + ". Fill them in at /admin/campaign before sending anything real.")
+    raise CampaignNotReady(message + ". Nothing real goes out until this is fixed.")
 
 
 CAMPAIGN_FIELDS = [

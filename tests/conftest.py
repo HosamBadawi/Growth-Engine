@@ -25,6 +25,9 @@ def safe_settings(monkeypatch):
     monkeypatch.setenv("SEND_WINDOW_END", "16:30")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:9")  # dead port
     get_settings.cache_clear()
+    import engine.campaign as campaign_mod
+
+    campaign_mod._warned_fields = ()  # warn-once dedupe must not leak across tests
     yield
     get_settings.cache_clear()
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.3.1 (2026-08-07)
+
+**The From header joins the placeholder gate.** v2.3.0 validated the campaign
+profile but the From header is built from the email identity
+(saved connection, then .env FROM_NAME / FROM_EMAIL), which the gate never
+looked at: a fully filled campaign could still ship every email as
+"Your Name". Now:
+
+- `assert_campaign_ready()` also checks the raw configured identity against
+  the placeholder markers, reporting `from_name` / `from_email` with an error
+  that points at .env or the saved email connection rather than
+  /admin/campaign. An empty FROM_EMAIL is checked as the "dryrun@localhost"
+  the message builder would stamp on it.
+- When FROM_NAME is unset or still the "Your Name" default, `resolve_email()`
+  falls back to the campaign's sender_name instead of the placeholder string.
+  The gate still checks the raw value, so the fallback fixes DRY_RUN artifacts
+  without letting an unset identity slip into SANDBOX or LIVE.
+
+
 ## 2.3.0 (2026-08-02)
 
 **A quality gate release: no new modules, seven focused fixes.** The trigger

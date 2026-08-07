@@ -165,10 +165,159 @@ def _save_real_campaign(session, **overrides):
     session.commit()
 
 
-def test_real_campaign_is_ready_for_live(session):
+def _real_identity(monkeypatch):
+    monkeypatch.setenv("FROM_NAME", "Jane Doe")
+    monkeypatch.setenv("FROM_EMAIL", "jane@acme-answering.io")
+    get_settings.cache_clear()
+
+
+def test_real_campaign_is_ready_for_live(session, monkeypatch):
     _save_real_campaign(session)
+    _real_identity(monkeypatch)
     assert get_campaign(session).placeholder_fields == []
     assert_campaign_ready("LIVE")  # must not raise
+
+
+# ── v2.3.1: the From identity joins the gate ─────────────────────────────────
+
+def test_placeholder_from_name_blocks_despite_clean_campaign(session, monkeypatch):
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "Your Name")
+    monkeypatch.setenv("FROM_EMAIL", "jane@acme-answering.io")
+    get_settings.cache_clear()
+    for mode in ("SANDBOX", "LIVE"):
+        with pytest.raises(CampaignNotReady) as excinfo:
+            assert_campaign_ready(mode)
+        assert "from_name" in str(excinfo.value)
+        assert "FROM_NAME" in str(excinfo.value)   # points at .env, not /admin
+    assert_campaign_ready("DRY_RUN")  # warns, must not raise
+
+
+def test_empty_from_email_blocks_as_dryrun_localhost(session, monkeypatch):
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "Jane Doe")
+    monkeypatch.setenv("FROM_EMAIL", "")
+    get_settings.cache_clear()
+    with pytest.raises(CampaignNotReady) as excinfo:
+        assert_campaign_ready("SANDBOX")
+    assert "from_email" in str(excinfo.value)
+
+
+def test_from_name_falls_back_to_campaign_sender(session, monkeypatch):
+    from engine.connections import resolve_email
+
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "Your Name")
+    monkeypatch.setenv("FROM_EMAIL", "jane@acme-answering.io")
+    get_settings.cache_clear()
+    assert resolve_email(session).from_name == "Jane Doe"
+
+
+def test_from_name_fallback_without_campaign_keeps_raw(session, monkeypatch):
+    """No real campaign to borrow from: the raw value stays, and the gate is
+    what blocks it, not a crash or an empty From header."""
+    from engine.connections import resolve_email
+
+    monkeypatch.setenv("FROM_NAME", "Your Name")
+    get_settings.cache_clear()
+    assert resolve_email(session).from_name == "Your Name"
+
+
+def test_real_from_identity_does_not_raise(session, monkeypatch):
+    _save_real_campaign(session)
+    _real_identity(monkeypatch)
+    assert_campaign_ready("LIVE")  # must not raise
+    assert_campaign_ready("SANDBOX")
+
+
+def _save_email_connection(session, **cfg):
+    session.add(Connection(kind=ConnectionKind.EMAIL, name="acct",
+                           is_active=True, config_json=cfg))
+    session.commit()
+
+
+def test_placeholder_identity_in_saved_connection_blocks(session, monkeypatch):
+    """The connection overrides .env, so its placeholders must gate too."""
+    _save_real_campaign(session)
+    _real_identity(monkeypatch)  # .env is real; the connection is not
+    _save_email_connection(session, from_name="Your Name",
+                           from_email="sales@yourdomain.com")
+    with pytest.raises(CampaignNotReady) as excinfo:
+        assert_campaign_ready("LIVE")
+    message = str(excinfo.value)
+    assert "from_name" in message
+    assert "from_email" in message
+
+
+def test_real_identity_in_connection_beats_default_env(session, monkeypatch):
+    """The reverse: a configured connection must not be blocked by lazy .env."""
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "Your Name")
+    monkeypatch.setenv("FROM_EMAIL", "")
+    get_settings.cache_clear()
+    _save_email_connection(session, from_name="Jane Doe",
+                           from_email="jane@acme-answering.io")
+    assert_campaign_ready("LIVE")  # must not raise
+
+
+def test_connection_placeholder_from_name_heals_from_campaign(session, monkeypatch):
+    from engine.connections import resolve_email
+
+    _save_real_campaign(session)
+    _real_identity(monkeypatch)
+    _save_email_connection(session, from_name="Your Name",
+                           from_email="jane@acme-answering.io")
+    assert resolve_email(session).from_name == "Jane Doe"
+
+
+def test_blank_from_name_blocks(session, monkeypatch):
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "")
+    monkeypatch.setenv("FROM_EMAIL", "jane@acme-answering.io")
+    get_settings.cache_clear()
+    with pytest.raises(CampaignNotReady) as excinfo:
+        assert_campaign_ready("SANDBOX")
+    assert "from_name" in str(excinfo.value)
+
+
+def test_whitespace_from_email_blocks(session, monkeypatch):
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "Jane Doe")
+    monkeypatch.setenv("FROM_EMAIL", "   ")
+    get_settings.cache_clear()
+    with pytest.raises(CampaignNotReady) as excinfo:
+        assert_campaign_ready("LIVE")
+    assert "from_email" in str(excinfo.value)
+
+
+def test_golive_block_message_names_identity(session, monkeypatch):
+    from bot.telegram_bot import _campaign_block_message
+
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "Your Name")
+    monkeypatch.setenv("FROM_EMAIL", "jane@acme-answering.io")
+    get_settings.cache_clear()
+    blocked = _campaign_block_message()
+    assert blocked is not None
+    assert "from_name" in blocked
+    assert "FROM_NAME" in blocked   # points the operator at .env
+    _real_identity(monkeypatch)
+    assert _campaign_block_message() is None
+
+
+def test_dry_run_warns_once_naming_identity(session, monkeypatch, caplog):
+    import logging
+
+    _save_real_campaign(session)
+    monkeypatch.setenv("FROM_NAME", "Your Name")
+    monkeypatch.setenv("FROM_EMAIL", "jane@acme-answering.io")
+    get_settings.cache_clear()
+    with caplog.at_level(logging.WARNING, logger="campaign"):
+        assert_campaign_ready("DRY_RUN")
+        assert_campaign_ready("DRY_RUN")  # dedupe: same fields, one warning
+    warnings = [r.getMessage() for r in caplog.records
+                if r.name == "campaign" and "from_name" in r.getMessage()]
+    assert len(warnings) == 1
 
 
 # ── Change 4: owner-name coverage ────────────────────────────────────────────
