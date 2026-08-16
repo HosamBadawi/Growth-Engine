@@ -132,8 +132,16 @@ def test_subject_rules_reject_bad_subjects(prospect):
 
 # ── Change 2: placeholder campaign hard block ────────────────────────────────
 
-def test_placeholder_campaign_names_fields_and_blocks_sandbox(session):
-    campaign = get_campaign(session)  # env defaults = the example campaign
+def test_placeholder_campaign_names_fields_and_blocks_sandbox(session, monkeypatch):
+    # Hermetic: pin the example campaign; the developer's real .env has moved on.
+    monkeypatch.setenv("COMPANY_NAME", "Example Co")
+    monkeypatch.setenv("COMPANY_WEBSITE", "https://example.com")
+    monkeypatch.setenv("DEMO_URL", "https://example.com/demo")
+    monkeypatch.setenv("CALENDLY_URL", "https://example.com/call")
+    monkeypatch.setenv("POSTAL_ADDRESS", "Example Co | your postal address here")
+    monkeypatch.setenv("FROM_NAME", "Your Name")
+    get_settings.cache_clear()
+    campaign = get_campaign(session)  # example campaign, as on a fresh install
     fields = campaign.placeholder_fields
     assert "demo_url" in fields
     assert "postal_address" in fields

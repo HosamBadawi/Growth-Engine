@@ -1,7 +1,7 @@
 SUBJECT: {{ subject_line }}
 Hi {{ first_name }},
 
-I came across {{ company }} while researching {{ city }} {{ trade }} companies, and {{ personal_detail }} stood out.
+I came across {{ company }} while researching {{ city }} {{ trade }} companies{% if personal_detail %}, and {{ personal_detail }} stood out{% endif %}.
 
 One question: when a customer calls after hours or while your techs are on jobs, what happens to that call?
 
@@ -12,7 +12,5 @@ I built {{ product_pitch }}. It runs 24/7, no extra staff needed.
 60 second interactive demo: {{ demo_url }}
 
 Worth a quick look?
-
-Either way, respect for what you've built.
 
 {{ signature }}

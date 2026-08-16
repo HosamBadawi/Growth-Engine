@@ -75,7 +75,11 @@ def test_places_field_mask_is_lean():
     assert "reviews" not in FIELD_MASK
 
 
-def test_places_requires_key():
+def test_places_requires_key(monkeypatch):
+    # Hermetic: the developer's real .env may carry a key.
+    monkeypatch.setenv("PLACES_API_KEY", "")
+    from engine.config import get_settings
+    get_settings.cache_clear()
     provider = PlacesProvider()
     with pytest.raises(ValueError, match="PLACES_API_KEY"):
         provider.search("hvac tampa", limit=5)

@@ -50,6 +50,14 @@ def compute_stats(session: Session) -> dict:
         key = (intel or {}).get("reject_reason") or "other"
         reject_breakdown[key] = reject_breakdown.get(key, 0) + 1
 
+    # v2.5: prospects the drafting gates refuse to write to at all.
+    blocked_geo = blocked_trade = 0
+    for intel in session.execute(select(Prospect.intel_json)).scalars().all():
+        if (intel or {}).get("geo_mismatch"):
+            blocked_geo += 1
+        elif (intel or {}).get("trade_mismatch"):
+            blocked_trade += 1
+
     return {
         "prospects_found": count(select(func.count(Prospect.id))),
         "found_today": count(select(func.count(Prospect.id))
@@ -67,6 +75,8 @@ def compute_stats(session: Session) -> dict:
                                     Prospect.owner_name.isnot(None),
                                     Prospect.owner_name != "")),
         "verify_rejects": reject_breakdown,
+        "blocked_geo": blocked_geo,
+        "blocked_trade": blocked_trade,
         # A silently degrading run must be visible: fallback events are logged
         # with a fixed prefix exactly so this count can exist.
         "llm_fallbacks_today": count(
@@ -145,6 +155,10 @@ def build_report_text(session: Session) -> str:
         reject_line = f"Rejected addresses: {sum(rejects.values())} ({parts})\n"
     fallback_line = (f"LLM fallbacks today: {s['llm_fallbacks_today']}\n"
                      if s["llm_fallbacks_today"] else "")
+    blocked_line = ""
+    if s["blocked_geo"] or s["blocked_trade"]:
+        blocked_line = (f"Never drafted: geo mismatch {s['blocked_geo']}, "
+                        f"trade mismatch {s['blocked_trade']}\n")
     return (
         f"Growth Engine daily report [{s['mode']}]"
         f"{' *** PAUSED ***' if s['paused'] else ''}\n"
@@ -152,7 +166,7 @@ def build_report_text(session: Session) -> str:
         f"Enriched: {s['enriched']} | Verified: {s['verified']} | Form only: {s['form_only']}\n"
         f"Owner names: {s['owner_named']} of {s['verified_stage']} awaiting draft "
         f"({coverage}%)\n"
-        f"{reject_line}{fallback_line}"
+        f"{reject_line}{blocked_line}{fallback_line}"
         f"Drafts awaiting approval: {s['drafts_pending']} | Approved: {s['approved']} "
         f"| Queued: {s['queued']}\n"
         f"Sent today: {s['sent_today']} | Total sent: {s['total_sent']}\n"

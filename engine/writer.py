@@ -125,22 +125,44 @@ EMOJI_RE = re.compile(
 URL_RE = re.compile(r"https?://\S+")
 
 # Rendered against template_context(), selected by prospect.id so the same
-# prospect always gets the same subject and runs stay reproducible. A single
-# byte-identical subject across hundreds of sends is a bulk-mail fingerprint.
+# prospect always gets the same subject and runs stay reproducible. Every
+# pattern must contain {company}: v2.5 dropped "{city} {trade} question" after
+# it produced the same subject for three prospects in one 16-draft batch.
 SUBJECT_PATTERNS = [
     "missed call at {company}?",
     "quick question for {company}",
-    "{city} {trade} question",
     "after hours calls at {company}",
     "{company}, one question",
 ]
 
+GREETING_RE = re.compile(r"^Hi ([A-Z][a-z'’-]{1,20}|there),$")
+_FIRST_NAME_RE = re.compile(r"[A-Z][a-z'’-]{1,20}$")
+
+# The tell of a mail merge: compliments that carry no information. A body
+# containing any of these is rejected; the templates state a fact or nothing.
+BANNED_PHRASES = (
+    "local reputation", "something worth protecting", "something valuable",
+    "you clearly run", "solid operation", "respect for what you've built",
+    "built something",
+)
+
+# Acronyms that must keep their casing anywhere they appear in prose.
+_CASING_FIXES = ((re.compile(r"\bhvac\b", re.I), "HVAC"),
+                 (re.compile(r"\ba/c\b", re.I), "A/C"))
+
+
+def _fix_prose_casing(text: str) -> str:
+    for pattern, canonical in _CASING_FIXES:
+        text = pattern.sub(canonical, text)
+    return text
+
 
 def sanitize_detail(text: str) -> str:
-    """Make an LLM-produced snippet safe for the no-dash templates."""
+    """Make an LLM-produced snippet safe for the no-dash templates, with
+    prose casing applied (scraped text arrives as 'quality hvac systems')."""
     text = (text or "").strip().rstrip(".")
     text = text.replace("—", ",").replace("–", ",").replace(" - ", ", ").replace("--", ",")
-    return text
+    return _fix_prose_casing(text)
 
 
 def campaign_for(prospect: Prospect):
@@ -182,7 +204,10 @@ def greeting_first_name(prospect: Prospect) -> str:
             and any(p.startswith(local_alpha) for p in parts))
         if not overlap:
             return "there"
-    return owner.split()[0]
+    first = owner.split()[0]
+    # The greeting gate demands a clean single capitalized word; a name the
+    # regex cannot bless (ALLCAPS scrape, initials, stray digits) falls back.
+    return first if _FIRST_NAME_RE.fullmatch(first) else "there"
 
 
 _ROLE_LOCALS = {
@@ -209,8 +234,10 @@ def template_context(prospect: Prospect, card: dict | None = None) -> dict:
             detail = f"being in business {intel['years_in_business']}"
         elif prospect.rating and prospect.review_count:
             detail = f"your {prospect.rating} star rating from {prospect.review_count} customers"
-        else:
-            detail = "your local reputation"
+        # v2.5: no more "your local reputation". When nothing checkable exists
+        # the detail stays empty and the templates omit the sentence entirely;
+        # one less sentence beats an empty compliment.
+    detail = _fix_prose_casing(detail)
     raw_trade = (prospect.trade or "home service").strip().lower()
     context = {
         "first_name": first_name,
@@ -232,9 +259,14 @@ def template_context(prospect: Prospect, card: dict | None = None) -> dict:
     }
     # Deterministic per-prospect subject: same prospect, same subject, always.
     # The subject gets the title-cased company; the body keeps the legal name.
-    context["subject_line"] = SUBJECT_PATTERNS[
-        (prospect.id or 0) % len(SUBJECT_PATTERNS)].format(
-        **{**context, "company": _subject_company(prospect.name)})
+    subject_context = {**context, "company": _subject_company(prospect.name)}
+    subject = SUBJECT_PATTERNS[
+        (prospect.id or 0) % len(SUBJECT_PATTERNS)].format(**subject_context)
+    if len(subject.split()) > 8:
+        # A five word legal name overflows the longer patterns; the shortest
+        # pattern keeps the subject inside its own 8 word rule.
+        subject = "{company}, one question".format(**subject_context)
+    context["subject_line"] = subject
     return context
 
 
@@ -276,17 +308,23 @@ def render_footer() -> str:
     ).strip()
 
 
-def _personal_tokens(prospect: Prospect) -> set[str]:
+def _company_tokens(prospect: Prospect) -> set[str]:
+    """Tokens distinctive to THIS company's name (plus the full name itself)."""
     tokens = set()
+    if prospect.name:
+        tokens.add(_clean_company(prospect.name).lower())
+        for word in re.findall(r"[a-z]+", prospect.name.lower()):
+            if len(word) > 3 and word not in GENERIC_NAME_WORDS:
+                tokens.add(word)
+    return tokens
+
+
+def _personal_tokens(prospect: Prospect) -> set[str]:
+    tokens = _company_tokens(prospect)
     if prospect.owner_name:
         tokens.add(prospect.owner_name.split()[0].lower())
     if prospect.city:
         tokens.add(prospect.city.lower())
-    if prospect.name:
-        tokens.add(prospect.name.lower())
-        for word in re.findall(r"[a-z]+", prospect.name.lower()):
-            if len(word) > 3 and word not in GENERIC_NAME_WORDS:
-                tokens.add(word)
     return tokens
 
 
@@ -418,6 +456,28 @@ def check_style(subject: str, body: str, prospect: Prospect,
     if not body.strip().lower().startswith("hi "):
         violations.append(f'must open with the greeting '
                           f'"Hi {greeting_first_name(prospect)}," on its own line')
+    else:
+        # The greeting is one first name and a comma, nothing else. A real run
+        # opened with "Hi Ronald Mccrory at Anchor Construction Of Tampa in
+        # Tampa, FL," because the model pasted the whole prospect record.
+        first_line = body.strip().splitlines()[0].rstrip()
+        if not GREETING_RE.fullmatch(first_line):
+            violations.append(
+                f'the greeting line "{first_line}" must be exactly '
+                f'"Hi {greeting_first_name(prospect)}," with nothing added')
+
+    lowered_body = body.lower()
+    for phrase in BANNED_PHRASES:
+        if phrase in lowered_body:
+            violations.append(f'contains the empty flattery phrase "{phrase}"; '
+                              f"state a fact about their business or say nothing")
+
+    # Prose casing: hvac and a/c must be capitalized wherever they appear.
+    for pattern, canonical in _CASING_FIXES:
+        wrong = next((m.group(0) for m in pattern.finditer(body)
+                      if m.group(0) != canonical), None)
+        if wrong:
+            violations.append(f'write "{canonical}", not "{wrong}"')
 
     # Draft #34 shipped ending on "Should I send you the demo?" with no
     # signature at all. The last non-empty line must be the signature.
@@ -452,6 +512,11 @@ def check_style(subject: str, body: str, prospect: Prospect,
             violations.append(f"the subject is {subject_words} words, use 8 or fewer")
         if subject.rstrip().endswith("."):
             violations.append("the subject must not end with a full stop")
+        # "Tampa HVAC question" went to three prospects in one batch: nothing
+        # in it belonged to the business. Demand a distinctive company token.
+        if not any(token in subject_lower for token in _company_tokens(prospect)):
+            violations.append("the subject must contain a distinctive word "
+                              "from the company name")
     elif url_count > 2:
         violations.append(f"the body must not carry more than two http links, "
                           f"found {url_count}")
@@ -470,6 +535,11 @@ def writer_system_prompt(prospect: Prospect | None = None) -> str:
 Hard style rules, every one is checked by a machine:
 - Under 150 words total in the body. Short sentences, real punctuation, at
   least 4 sentences in at least 3 paragraphs separated by blank lines.
+- The first line is the greeting you are given, EXACTLY as given, one first
+  name and a comma. Never add surnames, company names, cities or titles to it.
+- State a fact about their business or say nothing. Never compliment a
+  business you know nothing about; no empty flattery, no "local reputation".
+- Write HVAC and A/C in capitals.
 - The FIRST line must reference the prospect's specific detail from the intel.
 - Include exactly one concrete money pain (a job value walking away).
 - Include the demo link exactly as given. Do NOT include any calendar or
@@ -481,6 +551,39 @@ Hard style rules, every one is checked by a machine:
 Reply with ONLY a JSON object: {{"body": "..."}}. The body is plain text with
 real line breaks. Do not copy the template verbatim, adapt it to this specific
 prospect. The subject line is handled separately, do not write one."""
+
+
+def _mismatch_blocks(session: Session, prospect: Prospect) -> bool:
+    """v2.5: a card that places the business in another state, or a business
+    whose name/intel belongs to another trade, is never drafted. A discarded
+    wrong detail leaves a hole the model fills with the campaign's own city,
+    producing a false statement; the only safe draft is no draft."""
+    from engine.researcher import geo_mismatch_reason
+    from engine.targeting import trade_mismatch_reason
+
+    intel = dict(prospect.intel_json or {})
+    blocked = False
+    changed = False
+    for key, compute in (("geo_mismatch", geo_mismatch_reason),
+                         ("trade_mismatch", trade_mismatch_reason)):
+        reason = compute(prospect)
+        if reason:
+            if intel.get(key) != reason:
+                intel[key] = reason
+                changed = True
+            log_event(session, "writer",
+                      f"{prospect.name}: not drafting ({key}: {reason})",
+                      level="WARNING")
+            blocked = True
+            break
+        if intel.pop(key, None) is not None:
+            # The rule (or the data) moved on: a stale flag must not keep a
+            # legitimate prospect out of the campaign forever.
+            changed = True
+    if changed:
+        prospect.intel_json = intel
+        session.commit()
+    return blocked
 
 
 async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
@@ -507,7 +610,13 @@ async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
                   f"{prospect.name}: not drafting, outside campaign target ({block})",
                   level="WARNING")
         return None
+    if _mismatch_blocks(session, prospect):
+        return None
     card = await build_intel_card(session, prospect)
+    # The card build itself can discover the mismatch (fresh research naming
+    # another state); check again before any prose is written.
+    if _mismatch_blocks(session, prospect):
+        return None
     template_name = initial_template_for(prospect)
     tpl_subject, tpl_body = render_email_template(template_name, prospect, card)
 
@@ -518,8 +627,7 @@ async def generate_draft(session: Session, prospect: Prospect) -> Touch | None:
         f"- company: {prospect.name}\n"
         f"- trade: {prospect.trade}\n"
         f"- city: {(prospect.city or '').title()}, {prospect.state or ''}\n"
-        f"- owner first name: "
-        f"{greet if greet != 'there' else 'unknown, open with Hi there'}\n"
+        f'- greeting line, use it EXACTLY as the first line: "Hi {greet},"\n'
         f"- intel card: {card}\n"
         f"- average job value: ${campaign.job_value_for(prospect.trade)}\n"
         f"- demo link: {campaign.demo_url}\n\n"

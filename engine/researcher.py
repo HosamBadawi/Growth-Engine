@@ -48,19 +48,65 @@ _BANNED_TOPICS = ("bridal", "prom", "wedding", "pageant", "insurance",
                   "underwriting", "legal defense", "attorney", "law firm",
                   "catering", "real estate", "realtor", "mortgage")
 
-# Compact list of recognizable city names for the wrong-city check. Substring
-# scan over the lowercase detail; the prospect's own city is always allowed.
-_KNOWN_CITIES = (
-    "new york", "los angeles", "chicago", "houston", "phoenix", "philadelphia",
-    "san antonio", "san diego", "dallas", "san jose", "austin", "jacksonville",
-    "fort worth", "columbus", "charlotte", "san francisco", "indianapolis",
-    "seattle", "denver", "boston", "nashville", "detroit", "portland",
-    "las vegas", "memphis", "louisville", "baltimore", "milwaukee",
-    "albuquerque", "tucson", "sacramento", "kansas city", "atlanta", "miami",
-    "orlando", "tampa", "st petersburg", "new orleans", "cleveland",
-    "pittsburgh", "cincinnati", "minneapolis", "salt lake city", "san juan",
-    "toronto", "london", "rio de janeiro", "sao paulo", "mexico city",
-)
+# Recognizable city names -> state/region, for the wrong-city checks. A detail
+# naming ANY other city is discarded (detail level); the prospect itself is
+# only flagged GEO_MISMATCH when the named city sits in a DIFFERENT state:
+# "also serving St Petersburg" on a Tampa card is a service area, "serving
+# San Diego" on a Tampa card means the research found someone else's business.
+_KNOWN_CITIES = {
+    "new york": "NY", "los angeles": "CA", "chicago": "IL", "houston": "TX",
+    "phoenix": "AZ", "philadelphia": "PA", "san antonio": "TX",
+    "san diego": "CA", "escondido": "CA", "dallas": "TX", "san jose": "CA",
+    "austin": "TX", "jacksonville": "FL", "fort worth": "TX", "columbus": "OH",
+    "charlotte": "NC", "san francisco": "CA", "indianapolis": "IN",
+    "seattle": "WA", "denver": "CO", "boston": "MA", "nashville": "TN",
+    "detroit": "MI", "portland": "OR", "las vegas": "NV", "memphis": "TN",
+    "louisville": "KY", "baltimore": "MD", "milwaukee": "WI",
+    "albuquerque": "NM", "tucson": "AZ", "sacramento": "CA",
+    "kansas city": "MO", "atlanta": "GA", "miami": "FL", "orlando": "FL",
+    "tampa": "FL", "st petersburg": "FL", "clearwater": "FL",
+    "new orleans": "LA", "cleveland": "OH", "pittsburgh": "PA",
+    "cincinnati": "OH", "minneapolis": "MN", "salt lake city": "UT",
+    "san juan": "PR", "toronto": "ON", "london": "UK",
+    "rio de janeiro": "BR", "sao paulo": "BR", "mexico city": "MX",
+}
+
+
+def detail_names_other_city(detail: str, prospect: Prospect) -> str | None:
+    """The foreign city a detail names, or None. The prospect's own city (or a
+    city containing/contained by it) never counts."""
+    lowered = (detail or "").lower()
+    own_city = (prospect.city or "").strip().lower()
+    for city in _KNOWN_CITIES:
+        if city in lowered and city != own_city \
+                and (not own_city or (city not in own_city and own_city not in city)):
+            return city
+    return None
+
+
+def geo_mismatch_reason(prospect: Prospect, card: dict | None = None) -> str | None:
+    """Why this prospect must not be drafted AT ALL on geographic grounds.
+
+    v2.4 discarded a wrong-city detail and drafted anyway; the model then
+    filled the hole with the campaign city and produced a false statement
+    ("based in Tampa") about an Escondido business. A card whose text places
+    the business in another STATE is a targeting failure, not a detail one."""
+    if card is None:
+        card = (prospect.intel_json or {}).get("card") or {}
+    text = " ".join([
+        str(card.get("human_detail") or ""),
+        str(card.get("pain_signal") or ""),
+        " ".join(str(b) for b in (card.get("bullets") or [])),
+    ])
+    city = detail_names_other_city(text, prospect)
+    if not city:
+        return None
+    city_state = _KNOWN_CITIES.get(city, "")
+    own_state = (prospect.state or "").strip().upper()
+    if own_state and city_state and city_state == own_state:
+        return None  # neighboring market in the same state, a service area
+    return (f"intel places the business near '{city}' ({city_state or '?'}), "
+            f"prospect is filed under '{prospect.city or '?'}, {own_state or '?'}'")
 
 _RECENT_DETAILS: dict[str, int] = {}  # normalized detail -> first prospect id
 _RECENT_MAX = 50
@@ -129,11 +175,10 @@ def detail_discard_reason(detail: str, source_text: str, prospect: Prospect,
     for topic in _BANNED_TOPICS:
         if topic in lowered and topic not in trade:
             return f"off-industry topic '{topic}'"
-    own_city = (prospect.city or "").strip().lower()
-    for city in _KNOWN_CITIES:
-        if city in lowered and city != own_city \
-                and (not own_city or (city not in own_city and own_city not in city)):
-            return f"names city '{city}', prospect is in '{own_city or 'unknown'}'"
+    foreign_city = detail_names_other_city(lowered, prospect)
+    if foreign_city:
+        return (f"names city '{foreign_city}', prospect is in "
+                f"'{(prospect.city or '').strip().lower() or 'unknown'}'")
     words = _content_words(lowered)
     if words:
         source_words = set(_content_words(source_text))
@@ -287,6 +332,9 @@ def _gate_cached_detail(session: Session, prospect: Prospect,
                   f"({reason})", level="WARNING")
         card["human_detail"] = ""
         intel["card"] = card
+        geo = geo_mismatch_reason(prospect, card)
+        if geo:
+            intel["geo_mismatch"] = geo
         prospect.intel_json = dict(intel)
         session.commit()
     return card
@@ -344,6 +392,9 @@ async def build_intel_card(session: Session, prospect: Prospect,
                       f"{prospect.name}: discarded human_detail {detail!r} ({reason})",
                       level="WARNING")
             card["human_detail"] = ""
+            geo = geo_mismatch_reason(prospect, card)
+            if geo:
+                intel["geo_mismatch"] = geo
 
     if card.get("owner_name") and not prospect.owner_name:
         # Traceability: an owner name the model proposed must literally appear

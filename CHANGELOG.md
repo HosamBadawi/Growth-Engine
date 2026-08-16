@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.5.0 (2026-08-16)
+
+**Output polish: six deterministic rules that make machine tells impossible
+rather than unlikely.** A hand review of the 16 v2.4 drafts found each of
+these still shipping; every quoted failure is now a pinned regression test.
+
+- **The greeting is a first name and nothing else**: the first line must match
+  `Hi <Firstname>,` exactly. "Hi Ronald Mccrory at Anchor Construction Of
+  Tampa in Tampa, FL," can no longer pass. The greeting is rendered
+  deterministically and the model is told to keep it verbatim; a name the
+  pattern cannot bless falls back to "Hi there,".
+- **A wrong-city card kills the prospect, not just the detail**: discarding
+  "20 years serving San Diego" and drafting anyway let the model fill the hole
+  with "based in Tampa", a false statement. A card placing the business in
+  another state now flags GEO_MISMATCH and the prospect is never drafted.
+  Same-state service areas (St Petersburg on a Tampa card) stay fine.
+- **Independent trade check**: `prospect.trade` says what the source claimed,
+  and the source can be wrong. A company name or intel card carrying another
+  trade's vocabulary (construction, builders, restaurant, insurance...) flags
+  TRADE_MISMATCH and blocks the draft. "Contractor" and "building" only count
+  in the NAME, so a licensed HVAC contractor's own prose is safe. When in
+  doubt, do not draft.
+- **Empty flattery is banned**: "local reputation", "built something worth
+  protecting", "you clearly run a solid operation" and friends are rejected by
+  rule, removed from all three templates, and the fallback compliment is gone:
+  when nothing checkable exists the sentence is omitted entirely.
+- **Prose casing enforced**: lowercase "hvac" or "a/c" anywhere in a body is a
+  violation, and every string that reaches a template (including details
+  lifted from intel cards) passes through the casing fix first.
+- **No more subject collisions**: the "{city} {trade} question" pattern that
+  produced one subject for three prospects is gone; every pattern carries the
+  company name, a distinctive-company-token rule guards the subject, and
+  overlong legal names fall back to the shortest pattern instead of breaking
+  the 8 word rule.
+
+
 ## 2.4.0 (2026-08-07)
 
 **v2.3 fixed the prose; v2.4 fixes the facts.** A real 23-draft run shipped

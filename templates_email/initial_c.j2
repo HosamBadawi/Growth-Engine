@@ -5,9 +5,9 @@ Some quick math on {{ company }}.
 
 Most {{ trade }} shops in {{ city }} miss around {{ missed_calls_week }} calls a week. At ${{ job_value }} per job, that is ${{ weekly_loss }} a week riding on whether anyone can pick up.
 
-You clearly run a solid operation, {{ personal_detail }} says as much.
+{% if personal_detail %}I did look you up first: {{ personal_detail }}.
 
-So I built {{ product_pitch }}. It never sleeps and never puts a caller on hold.
+{% endif %}So I built {{ product_pitch }}. It never sleeps and never puts a caller on hold.
 
 See it work in 60 seconds: {{ demo_url }}
 
