@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.5.1 (2026-08-17)
+
+**Numbers must be real.** A draft claimed "50 calls a week mean missing out
+on $2500.00" when the campaign says 5 calls a week at $500 a job. Every
+number in a body must now be one the campaign or the prospect actually owns:
+the ROI math (missed calls, job value, weekly and yearly loss), the product's
+own constants (24/7, the 60 second demo), or a fact from the prospect's
+grounded intel card (rating, reviews, years). Anything else is a violation
+naming the bad number, so the retry loop fixes it. Money written with
+decimals ("$2500.00") is rejected outright with the correct form ("$2,500")
+in the message. URLs and the signature line are exempt from the scan.
+
+
 ## 2.5.0 (2026-08-16)
 
 **Output polish: six deterministic rules that make machine tells impossible

@@ -150,6 +150,44 @@ BANNED_PHRASES = (
 _CASING_FIXES = ((re.compile(r"\bhvac\b", re.I), "HVAC"),
                  (re.compile(r"\ba/c\b", re.I), "A/C"))
 
+_NUMBER_RE = re.compile(r"\$?\d[\d,]*(?:\.\d+)?")
+_MONEY_DECIMALS_RE = re.compile(r"\$\d[\d,]*\.\d+")
+# "24/7" and the "60 second demo" are the product's own constants; every other
+# number in a body must be a campaign number or a prospect fact.
+_PRODUCT_NUMBERS = {24.0, 7.0, 60.0}
+
+
+def _to_float(token: str) -> float | None:
+    try:
+        return float(token.lstrip("$").replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _allowed_numbers(prospect: Prospect, campaign) -> set[float]:
+    """Every number a draft may legitimately contain: the campaign's ROI math,
+    the product constants, and the prospect's own facts (rating, reviews, and
+    the numbers in an intel card that v2.4's grounding already verified)."""
+    job_value = campaign.job_value_for(prospect.trade)
+    weekly = campaign.missed_calls_per_week * job_value
+    allowed = {float(campaign.missed_calls_per_week), float(job_value),
+               float(weekly), float(weekly * 52)} | set(_PRODUCT_NUMBERS)
+    intel = prospect.intel_json or {}
+    card = intel.get("card") or {}
+    sources = " ".join([
+        str(card.get("human_detail") or ""),
+        str(card.get("pain_signal") or ""),
+        " ".join(str(b) for b in (card.get("bullets") or [])),
+        str(intel.get("years_in_business") or ""),
+        str(prospect.rating or ""), str(prospect.review_count or ""),
+        prospect.name or "", campaign.product_pitch or "",
+    ])
+    for token in _NUMBER_RE.findall(sources):
+        value = _to_float(token)
+        if value is not None:
+            allowed.add(value)
+    return allowed
+
 
 def _fix_prose_casing(text: str) -> str:
     for pattern, canonical in _CASING_FIXES:
@@ -478,6 +516,29 @@ def check_style(subject: str, body: str, prospect: Prospect,
                       if m.group(0) != canonical), None)
         if wrong:
             violations.append(f'write "{canonical}", not "{wrong}"')
+
+    # v2.5.1: the writer invented "50 calls a week mean missing out on
+    # $2500.00" when the campaign says 5 calls at $500. Every number in the
+    # body must be one the campaign or the prospect actually owns. URLs and
+    # the signature (which may carry a phone number) are exempt.
+    number_prose = URL_RE.sub(" ", _strip_for_readability(body, campaign.signature))
+    for match in _MONEY_DECIMALS_RE.finditer(number_prose):
+        value = _to_float(match.group(0))
+        pretty = f"${int(round(value)):,}" if value is not None else match.group(0)
+        violations.append(f'money must not carry decimals: write "{pretty}", '
+                          f'not "{match.group(0)}"')
+    allowed_numbers = _allowed_numbers(prospect, campaign)
+    ungrounded = []
+    for token in _NUMBER_RE.findall(number_prose):
+        value = _to_float(token)
+        if value is not None and value not in allowed_numbers \
+                and token not in ungrounded:
+            ungrounded.append(token)
+    if ungrounded:
+        violations.append(
+            "numbers that are not campaign or prospect facts: "
+            + ", ".join(f'"{t}"' for t in ungrounded)
+            + "; use only the numbers you were given, or none")
 
     # Draft #34 shipped ending on "Should I send you the demo?" with no
     # signature at all. The last non-empty line must be the signature.

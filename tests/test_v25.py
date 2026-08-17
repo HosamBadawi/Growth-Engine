@@ -269,6 +269,53 @@ def test_detail_casing_fixed_before_templates(session):
     assert "hvac" not in context["personal_detail"]
 
 
+# ── v2.5.1: numbers must be real ─────────────────────────────────────────────
+
+DRAFT_16_SENTENCE = ("Without a chat widget, 50 calls a week mean missing out "
+                     "on $2500.00 in potential jobs.")
+
+
+def test_draft_16_invented_numbers_rejected(prospect):
+    """The pinned case: the campaign says 5 calls a week at $500 a job; the
+    writer said 50 calls and $2500.00."""
+    body = _good_body(prospect).replace(
+        "For most companies a $500 job walks away.", DRAFT_16_SENTENCE)
+    violations = check_style(f"quick question for {prospect.name}", body,
+                             prospect, TouchType.EMAIL_1)
+    assert any('"50"' in v and "not campaign or prospect facts" in v
+               for v in violations), violations
+    assert any('write "$2,500"' in v for v in violations), violations
+
+
+def test_decimal_money_rejected_even_when_the_number_is_grounded(session):
+    """Action Air's card really says '50 years of experience', which grounds
+    the number 50; the $2500.00 formatting alone must still reject the body."""
+    p = Prospect(name="Action Airconditioning Inc", trade="hvac", city="tampa",
+                 email="info@action.example", owner_name="David Russell",
+                 intel_json={"card": {
+                     "human_detail": "50 years of experience with air "
+                                     "conditioning systems",
+                     "pain_signal": "", "bullets": []}})
+    session.add(p)
+    session.commit()
+    body = _good_body(p, greeting="Hi David,").replace(
+        "For most companies a $500 job walks away.", DRAFT_16_SENTENCE)
+    violations = check_style(f"quick question for {p.name}", body, p,
+                             TouchType.EMAIL_1)
+    assert any("must not carry decimals" in v for v in violations)
+
+
+def test_campaign_and_prospect_numbers_stay_legal(prospect):
+    """$500 job, 4.8 stars, 60 second demo, 24/7: all owned, all fine."""
+    body = _good_body(prospect).replace(
+        "For most companies a $500 job walks away.",
+        "For most companies a $500 job walks away. We run 24/7 and the demo "
+        "takes 60 seconds.")
+    violations = check_style(f"quick question for {prospect.name}", body,
+                             prospect, TouchType.EMAIL_1)
+    assert not any("facts" in v or "decimals" in v for v in violations), violations
+
+
 # ── 6. subject collisions ────────────────────────────────────────────────────
 
 def test_generic_pattern_is_gone_and_all_carry_company():
